@@ -101,8 +101,6 @@ var proxyStartCmd = &cobra.Command{
 		}
 		flagPassthrough, _ := cmd.Flags().GetStringSlice("passthrough")
 		passthrough := proxy.MergePassthrough(proxyConfig, flagPassthrough)
-		flagIntercept, _ := cmd.Flags().GetStringSlice("intercept")
-		intercept := proxy.MergeIntercept(proxyConfig, flagIntercept)
 		upstreamProxy, _ := cmd.Flags().GetString("upstream-proxy")
 
 		engine, err := factory(proxy.Options{
@@ -112,7 +110,6 @@ var proxyStartCmd = &cobra.Command{
 			LogWriter:        io.MultiWriter(os.Stderr, logFile),
 			AgentEnvPath:     agentproxy.AgentEnvPath(dataDir),
 			PassthroughHosts: passthrough,
-			InterceptHosts:   intercept,
 			UpstreamProxy:    upstreamProxy,
 		})
 		if err != nil {
@@ -137,7 +134,6 @@ func init() {
 	proxyStartCmd.Flags().String("log-file", "", "write proxy logs to this file (default <data-dir>/proxy.log)")
 	proxyStartCmd.Flags().String("proxy-config", "", "path to the proxy YAML config (default <data-dir>/doppler-proxy.yaml, scaffolded on first run)")
 	proxyStartCmd.Flags().StringSlice("passthrough", nil, "extra hostnames to blind-tunnel, appended to the config's passthrough list")
-	proxyStartCmd.Flags().StringSlice("intercept", nil, "extra hostnames to MITM (envoy engine), appended to the config's intercept list")
 	proxyStartCmd.Flags().String("upstream-proxy", "", "chain the proxy's own outbound connections through another HTTP proxy (e.g. http://127.0.0.1:3128 in a devcontainer)")
 	// Project/config resolve from `doppler setup` scope by default; these flags
 	// override it (same behavior as `doppler run`).

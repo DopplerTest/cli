@@ -61,26 +61,3 @@ func TestMergePassthrough(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
-
-func TestMergeIntercept(t *testing.T) {
-	cfg := &ProxyConfig{Intercept: []string{"api.github.com"}}
-	got := MergeIntercept(cfg, []string{"api.internal.example.com", "api.github.com", ""})
-	want := []string{"api.github.com", "api.internal.example.com"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-}
-
-// intercept is parsed from the YAML and stays independent of passthrough.
-func TestParseInterceptList(t *testing.T) {
-	cfg, err := parseProxyConfig([]byte("passthrough:\n  - a.com\nintercept:\n  - api.acme.com\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(cfg.Intercept, []string{"api.acme.com"}) {
-		t.Fatalf("intercept = %v", cfg.Intercept)
-	}
-	if !slices.Equal(cfg.Passthrough, []string{"a.com"}) {
-		t.Fatalf("passthrough = %v", cfg.Passthrough)
-	}
-}

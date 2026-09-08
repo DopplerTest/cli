@@ -49,10 +49,6 @@ type Options struct {
 	AgentEnvPath     string
 	PassthroughHosts []string
 	UpstreamProxy    string
-	// InterceptHosts are extra hosts to MITM, used by engines (e.g. envoy) that
-	// need the intercept set declared up front. Ignored by engines that intercept
-	// every host on the fly (masked-hash).
-	InterceptHosts []string
 }
 
 // Factory builds an Engine from Options.

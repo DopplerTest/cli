@@ -28,12 +28,6 @@ type ProxyConfig struct {
 	// Passthrough lists hostnames the proxy blind-tunnels instead of
 	// intercepting (no TLS termination, no injection).
 	Passthrough []string `yaml:"passthrough"`
-
-	// Intercept lists extra hostnames the Envoy engine (--engine envoy) should
-	// MITM, beyond those it infers from token shapes. It's the escape hatch for
-	// secrets whose values aren't recognizable tokens. Ignored by the default
-	// masked-hash engine, which intercepts every host automatically.
-	Intercept []string `yaml:"intercept"`
 }
 
 // starterConfig is written on first run so the operator has an editable file,
@@ -55,13 +49,6 @@ passthrough:
   - claude.com
   - statsig.anthropic.com
   - sentry.io
-
-# Hosts the Envoy engine (--engine envoy) additionally INTERCEPTS, on top of the
-# ones it infers from your secrets' token shapes (e.g. ghp_… -> api.github.com).
-# Add API hosts whose secrets aren't recognizable tokens. Only the envoy engine
-# reads this; the default masked-hash engine intercepts every host automatically.
-# intercept:
-#   - api.internal.example.com
 `
 
 // LoadOrScaffold loads the proxy config from path. If the file does not exist it
@@ -94,12 +81,6 @@ func parseProxyConfig(data []byte) (*ProxyConfig, error) {
 // de-duplicated and order-preserving (config entries first).
 func MergePassthrough(cfg *ProxyConfig, extra []string) []string {
 	return mergeHostLists(cfg.Passthrough, extra)
-}
-
-// MergeIntercept returns the config's intercept hosts plus any extras,
-// de-duplicated and order-preserving (config entries first).
-func MergeIntercept(cfg *ProxyConfig, extra []string) []string {
-	return mergeHostLists(cfg.Intercept, extra)
 }
 
 func mergeHostLists(base, extra []string) []string {
