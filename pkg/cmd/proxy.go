@@ -18,6 +18,8 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -101,19 +103,29 @@ var proxyStartCmd = &cobra.Command{
 		} else {
 			utils.Log(fmt.Sprintf("Proxy config: %s", proxyConfigPath))
 		}
-		utils.Log("  (edit it to set passthrough / intercept / signing / oauth, then restart)")
+		utils.Log("  (edit it to set passthrough hosts, then restart)")
 
 		// Address precedence: --address flag (if explicitly set) > config
-		// listen_address > the flag's built-in default.
+		// listen_address > the flag's built-in default. The scaffolded default is
+		// 0.0.0.0, which serves both host tools and the sandbox container; the
+		// per-run proxy token (below) is what keeps a broad bind from being an open
+		// proxy.
 		if !cmd.Flags().Changed("address") && proxyConfig.ListenAddress != "" {
 			address = proxyConfig.ListenAddress
 		}
 
 		flagPassthrough, _ := cmd.Flags().GetStringSlice("passthrough")
 		passthrough := proxy.MergePassthrough(proxyConfig, flagPassthrough)
-		flagIntercept, _ := cmd.Flags().GetStringSlice("intercept")
-		intercept := proxy.MergeIntercept(proxyConfig, flagIntercept)
 		upstreamProxy, _ := cmd.Flags().GetString("upstream-proxy")
+
+		// Mint a per-run credential the proxy requires from every client, so a
+		// broadly-bound or shared-network listener isn't an open forward proxy. It's
+		// embedded in the agent env's proxy URL, so configured clients send it
+		// automatically.
+		proxyToken, err := mintProxyToken()
+		if err != nil {
+			utils.HandleError(err, "unable to generate the per-run proxy token")
+		}
 
 		engine, err := factory(proxy.Options{
 			ListenAddr:       address,
@@ -122,10 +134,8 @@ var proxyStartCmd = &cobra.Command{
 			LogWriter:        io.MultiWriter(os.Stderr, logFile),
 			AgentEnvPath:     agentproxy.AgentEnvPath(dataDir),
 			PassthroughHosts: passthrough,
-			InterceptHosts:   intercept,
-			Signing:          proxyConfig.Signing,
-			OAuth:            proxyConfig.OAuth,
 			UpstreamProxy:    upstreamProxy,
+			ProxyAuthToken:   proxyToken,
 		})
 		if err != nil {
 			utils.HandleError(err)
@@ -145,11 +155,10 @@ var proxyStartCmd = &cobra.Command{
 
 func init() {
 	proxyStartCmd.Flags().String("engine", "masked-hash", "proxy engine to run")
-	proxyStartCmd.Flags().String("address", "127.0.0.1:14322", "address the proxy listens on (overrides listen_address in the proxy config)")
+	proxyStartCmd.Flags().String("address", "0.0.0.0:14322", "address the proxy listens on; serves host + sandbox (set 127.0.0.1 for loopback-only, no sandbox). Overrides listen_address in the proxy config")
 	proxyStartCmd.Flags().String("log-file", "", "write proxy logs to this file (default <data-dir>/proxy.log)")
 	proxyStartCmd.Flags().String("proxy-config", "", "path to the proxy YAML config (default <data-dir>/doppler-proxy.yaml, scaffolded on first run)")
 	proxyStartCmd.Flags().StringSlice("passthrough", nil, "extra hostnames to blind-tunnel, appended to the config's passthrough list")
-	proxyStartCmd.Flags().StringSlice("intercept", nil, "extra hostnames to MITM (envoy engine), appended to the config's intercept list")
 	proxyStartCmd.Flags().String("upstream-proxy", "", "chain the proxy's own outbound connections through another HTTP proxy (e.g. http://127.0.0.1:3128 in a devcontainer)")
 	// Project/config resolve from `doppler setup` scope by default; these flags
 	// override it (same behavior as `doppler run`).
@@ -163,4 +172,13 @@ func init() {
 	}
 	proxyCmd.AddCommand(proxyStartCmd)
 	rootCmd.AddCommand(proxyCmd)
+}
+
+// mintProxyToken returns a fresh, high-entropy per-run credential (256 bits, hex).
+func mintProxyToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

@@ -38,13 +38,21 @@ error() {
 
 flags=('analytics' 'env-warning' 'update-check')
 
+# analytics is opt-in, all other flags are enabled by default
+defaultValue() {
+  case "$1" in
+    analytics) echo 'false' ;;
+    *) echo 'true' ;;
+  esac
+}
+
 beforeAll
 
 beforeEach
 
 # verify defaults
 for flag in "${flags[@]}"; do
-  [[ "$("$DOPPLER_BINARY" configure flags get "$flag" --plain --config-dir=$TEST_CONFIG_DIR)" == 'true' ]] || error "ERROR: incorrect default for $flag"
+  [[ "$("$DOPPLER_BINARY" configure flags get "$flag" --plain --config-dir=$TEST_CONFIG_DIR)" == "$(defaultValue "$flag")" ]] || error "ERROR: incorrect default for $flag"
 done
 
 beforeEach
@@ -63,17 +71,17 @@ done
 for flag in "${flags[@]}"; do
   "$DOPPLER_BINARY" configure flags disable "$flag" --config-dir=$TEST_CONFIG_DIR >/dev/null 2>/dev/null
   "$DOPPLER_BINARY" configure flags reset -y "$flag" --config-dir=$TEST_CONFIG_DIR >/dev/null 2>/dev/null
-  [[ "$("$DOPPLER_BINARY" configure flags get "$flag" --plain --config-dir=$TEST_CONFIG_DIR)" == 'true' ]] || error "ERROR: incorrect value for $flag after reset"
+  [[ "$("$DOPPLER_BINARY" configure flags get "$flag" --plain --config-dir=$TEST_CONFIG_DIR)" == "$(defaultValue "$flag")" ]] || error "ERROR: incorrect value for $flag after reset"
 done
 
 beforeEach
 
 # verify interoperability between 'flags' command and legacy 'analytics' command
-[[ "$("$DOPPLER_BINARY" configure flags get analytics --plain --config-dir=$TEST_CONFIG_DIR)" == 'true' ]] || error "ERROR: incorrect initial value for analytics"
-"$DOPPLER_BINARY" analytics disable --config-dir=$TEST_CONFIG_DIR >/dev/null 2>&1
-[[ "$("$DOPPLER_BINARY" configure flags get analytics --plain --config-dir=$TEST_CONFIG_DIR)" == 'false' ]] || error "ERROR: incorrect disabled value for analytics"
+[[ "$("$DOPPLER_BINARY" configure flags get analytics --plain --config-dir=$TEST_CONFIG_DIR)" == 'false' ]] || error "ERROR: incorrect initial value for analytics"
 "$DOPPLER_BINARY" analytics enable --config-dir=$TEST_CONFIG_DIR >/dev/null 2>&1
 [[ "$("$DOPPLER_BINARY" configure flags get analytics --plain --config-dir=$TEST_CONFIG_DIR)" == 'true' ]] || error "ERROR: incorrect enabled value for analytics"
+"$DOPPLER_BINARY" analytics disable --config-dir=$TEST_CONFIG_DIR >/dev/null 2>&1
+[[ "$("$DOPPLER_BINARY" configure flags get analytics --plain --config-dir=$TEST_CONFIG_DIR)" == 'false' ]] || error "ERROR: incorrect disabled value for analytics"
 
 beforeEach
 
@@ -86,11 +94,21 @@ EOF
 
 [[ "$("$DOPPLER_BINARY" configure flags get analytics --plain --config-dir=$TEST_CONFIG_DIR)" == 'false' ]] || error "ERROR: incorrect value read when parsing legacy analytics field in config file"
 
+# legacy 'disable: false' is not an opt-in; older binaries wrote it unconditionally,
+# so it's indistinguishable from the field being unset
 cat << EOF > ./temp-config-dir/.doppler.yaml
 analytics:
     disable: false
 EOF
 
-[[ "$("$DOPPLER_BINARY" configure flags get analytics --plain --config-dir=$TEST_CONFIG_DIR)" == 'true' ]] || error "ERROR: incorrect value read when parsing legacy analytics field in config file"
+[[ "$("$DOPPLER_BINARY" configure flags get analytics --plain --config-dir=$TEST_CONFIG_DIR)" == 'false' ]] || error "ERROR: legacy 'analytics.disable: false' field in config file treated as an opt-in"
+
+# parse analytics flag from config file
+cat << EOF > ./temp-config-dir/.doppler.yaml
+flags:
+    analytics: true
+EOF
+
+[[ "$("$DOPPLER_BINARY" configure flags get analytics --plain --config-dir=$TEST_CONFIG_DIR)" == 'true' ]] || error "ERROR: incorrect value read when parsing analytics flag in config file"
 
 afterAll

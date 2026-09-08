@@ -4,25 +4,25 @@ on:
   pull_request:
     branches:
       - master
-      - releases/*
-  push:
-    branches:
-      - master
-      - releases/*
+  workflow_call:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
     - name: Set up Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version: '1.25' # GO_VERSION_DEF
         check-latest: true
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@50fbc622fc4ef5163becd7fab6573eac35f8462e # v1.2.0
       with:
         path: ./src/github.com/${{ github.repository }}
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      with:
+        platforms: arm64
     - name: GoReleaser Action
       uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
       with:
@@ -30,15 +30,26 @@ jobs:
         args: release --snapshot --skip=publish,sign
       env:
         GOPATH: ${{ runner.workspace }}
-    - uses: actions/upload-artifact@master
+    - name: Smoke test snapshot images
+      run: |
+        set -euo pipefail;
+        version="$(jq -r .version dist/metadata.json)";
+        for entry in "linux/amd64 amd64" "linux/arm64 arm64"; do
+          set -- $entry;
+          # snapshot builds are --load'ed with a platform-suffixed tag
+          image="dopplerhq/cli:${version}-$2";
+          docker image inspect "$image" --format '{{.Architecture}}';
+          docker run --rm --platform "$1" -e DOPPLER_ENABLE_VERSION_CHECK=false "$image" --version;
+        done
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: macOS build (amd64)
         path: ./dist/doppler_darwin_amd64_v1/doppler
-    - uses: actions/upload-artifact@master
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: macOS build (arm64)
         path: ./dist/doppler_darwin_arm64/doppler
-    - uses: actions/upload-artifact@master
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: Linux build (amd64)
         path: ./dist/doppler_linux_amd64_v1/doppler

@@ -8,37 +8,51 @@ on:
         required: true
         type: choice
         options:
-          - "major"
-          - "minor"
           - "patch"
+          - "minor"
+          - "major"
 
 jobs:
+  release-tests:
+    uses: ./.github/workflows/release-tests.yaml
   publish:
+    name: publish - ${{ inputs.type }}
+    needs: release-tests
     runs-on: ubuntu-latest-16-core
     environment: "production"
-    if: github.actor == 'emily-curry' || github.actor == 'seslattery'
     permissions:
       contents: write
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.25" # GO_VERSION_DEF
           check-latest: true
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: "master"
           # include tags so we can determine new version
           fetch-depth: 0
+      - name: Resolve Docker config directory
+        run: |
+          # Sets DOCKER_CONFIG for all future steps to an absolute path
+          mkdir -p "$DOCKER_CONFIG";
+          echo "DOCKER_CONFIG=$(cd "$DOCKER_CONFIG" && pwd)" >> "$GITHUB_ENV";
+        env:
+          DOCKER_CONFIG: ${{ secrets.DOCKER_CONFIG }}
+      - name: Set up QEMU
+        # registers binfmt handlers so buildx can run the target-arch `apk` steps
+        # in docker/alpine for non-amd64 platforms. Must precede setup-buildx
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        with:
+          platforms: arm64
       - name: Set up Docker Buildx
         # dockers_v2 builds via `docker buildx build`; goreleaser expects the
         # docker-container driver, which this action configures by default
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-      - name: Update alpine image
-        run: docker pull alpine
       - name: Install Doppler CLI
-        uses: dopplerhq/cli-action@v2
+        uses: dopplerhq/cli-action@41106dbef2e821dcf2250b0c936a616a438a278a # v2
       - name: Install Cloudsmith CLI
         run: pip install --upgrade cloudsmith-cli
       - name: Configure git
@@ -50,7 +64,6 @@ jobs:
           echo "$DOCKER_HUB_TOKEN" | docker login -u "$DOCKER_HUB_USER" --password-stdin "$DOCKER_REGISTRY";
           echo "$GCP_KEY" | docker login -u "$GCR_USER" --password-stdin "$GCR_REGISTRY";
         env:
-          DOCKER_CONFIG: ${{ secrets.DOCKER_CONFIG }}
           DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
           DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
           DOCKER_HUB_USER: ${{ secrets.DOCKER_HUB_USER }}
@@ -75,7 +88,6 @@ jobs:
         env:
           GOPATH: ${{ runner.workspace }}
           GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
-          DOCKER_CONFIG: ${{ secrets.DOCKER_CONFIG }}
           GCP_KEY: ${{ secrets.GCP_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
       - name: Publish to Cloudsmith
@@ -110,8 +122,9 @@ jobs:
           docker logout "$DOCKER_REGISTRY";
           docker logout "$GCR_REGISTRY";
           set -e;
-          rm -rf "$DOCKER_CONFIG";
+          # leave the rest of the dir alone; it holds the buildx builder state
+          # that setup-buildx-action tears down in its post-job step
+          rm -f "$DOCKER_CONFIG/config.json";
         env:
-          DOCKER_CONFIG: ${{ secrets.DOCKER_CONFIG }}
           DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
           GCR_REGISTRY: ${{ secrets.GCR_REGISTRY }}

@@ -87,50 +87,12 @@ func TestMergePassthrough(t *testing.T) {
 	}
 }
 
-func TestMergeIntercept(t *testing.T) {
-	cfg := &ProxyConfig{Intercept: []string{"api.github.com"}}
-	got := MergeIntercept(cfg, []string{"api.internal.example.com", "api.github.com", ""})
-	want := []string{"api.github.com", "api.internal.example.com"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-}
-
-func TestParseSigningAndOAuth(t *testing.T) {
-	yaml := `
-signing:
-  - host: sts.amazonaws.com
-    service: sts
-    region: us-east-1
-oauth:
-  - host: api.spotify.com
-    token_endpoint: https://accounts.spotify.com/api/token
-    client_id: cid123
-    client_secret_ref: SPOTIFY_CLIENT_SECRET
-`
-	cfg, err := parseProxyConfig([]byte(yaml))
+func TestParsePassthroughList(t *testing.T) {
+	cfg, err := parseProxyConfig([]byte("passthrough:\n  - a.com\n  - b.com\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Signing) != 1 || cfg.Signing[0].Host != "sts.amazonaws.com" || cfg.Signing[0].Service != "sts" || cfg.Signing[0].Region != "us-east-1" {
-		t.Fatalf("signing parsed wrong: %+v", cfg.Signing)
-	}
-	o := cfg.OAuth
-	if len(o) != 1 || o[0].Host != "api.spotify.com" || o[0].TokenEndpoint != "https://accounts.spotify.com/api/token" || o[0].ClientID != "cid123" || o[0].ClientSecretRef != "SPOTIFY_CLIENT_SECRET" {
-		t.Fatalf("oauth parsed wrong: %+v", o)
-	}
-}
-
-// intercept is parsed from the YAML and stays independent of passthrough.
-func TestParseInterceptList(t *testing.T) {
-	cfg, err := parseProxyConfig([]byte("passthrough:\n  - a.com\nintercept:\n  - api.acme.com\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(cfg.Intercept, []string{"api.acme.com"}) {
-		t.Fatalf("intercept = %v", cfg.Intercept)
-	}
-	if !slices.Equal(cfg.Passthrough, []string{"a.com"}) {
+	if !slices.Equal(cfg.Passthrough, []string{"a.com", "b.com"}) {
 		t.Fatalf("passthrough = %v", cfg.Passthrough)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"os/user"
@@ -238,7 +239,10 @@ var agentEnforceCmd = &cobra.Command{
 		if err != nil {
 			utils.HandleError(fmt.Errorf("reading agent env %s: %w. Start the proxy first", envPath, err))
 		}
-		proxyURL := fmt.Sprintf("http://%s:%d", proxyHost, proxyPort)
+		// Keep the per-run proxy token (userinfo) from agent.env's HTTPS_PROXY and
+		// repoint only the host at this boundary. Dropping it would hand the agent a
+		// credential-less proxy URL and every request would get a 407.
+		proxyURL := fmt.Sprintf("http://%s%s:%d", proxyUserinfo(rawEnv), proxyHost, proxyPort)
 		overrides := map[string]string{
 			"HTTPS_PROXY":         proxyURL,
 			"HTTP_PROXY":          proxyURL,
@@ -326,6 +330,27 @@ func envOr(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// proxyUserinfo returns the "user:pass@" prefix from the agent env's HTTPS_PROXY
+// (the per-run proxy token), or "" if none. Used so `agent enforce` keeps the
+// credential when it repoints the proxy host, instead of dropping it.
+func proxyUserinfo(rawEnv []byte) string {
+	for _, line := range strings.Split(string(rawEnv), "\n") {
+		line = strings.TrimSpace(line)
+		v, ok := strings.CutPrefix(line, "HTTPS_PROXY=")
+		if !ok {
+			v, ok = strings.CutPrefix(line, "HTTP_PROXY=")
+		}
+		if !ok {
+			continue
+		}
+		v = strings.Trim(v, `'"`) // agent.env shell-quotes values
+		if u, err := url.Parse(v); err == nil && u.User != nil {
+			return u.User.String() + "@"
+		}
+	}
+	return ""
 }
 
 func init() {

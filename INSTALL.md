@@ -148,6 +148,8 @@ You can find the source `install.sh` file in this repo's `scripts` directory.
 
 We currently publish a `dopplerhq/cli` Docker image based on `alpine`. For more info, check out our [Docker guide](https://docs.doppler.com/docs/docker-base-image-guide).
 
+The image is published as a multi-platform manifest for `linux/amd64` and `linux/arm64`, so `docker pull dopplerhq/cli` selects the right architecture automatically. To pull a specific one, use `docker pull --platform=linux/arm64 dopplerhq/cli`.
+
 You can find all source Dockerfiles in this repo's `/docker` [folder](https://github.com/DopplerHQ/cli/tree/master/docker).
 
 ## GitHub Action

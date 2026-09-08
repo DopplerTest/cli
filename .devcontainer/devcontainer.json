@@ -1,0 +1,4 @@
+{
+  "image": "us-central1-docker.pkg.dev/gar-prod-73b1cdf/devtools/devcontainer:latest",
+  "name": "cli"
+}

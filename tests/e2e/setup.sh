@@ -266,12 +266,12 @@ beforeEach
 
 cat << EOF > doppler.yaml
 flags:
-  analytics: false
+  analytics: true
   env-warning: false
   update-check: false
 EOF
 "$DOPPLER_BINARY" setup --config-dir=$TEST_CONFIG_DIR --no-interactive
-[[ "$("$DOPPLER_BINARY" configure flags get analytics --config-dir=$TEST_CONFIG_DIR --plain)" == 'false' ]] || error "ERROR: setup not setting disabled value for analytics"
+[[ "$("$DOPPLER_BINARY" configure flags get analytics --config-dir=$TEST_CONFIG_DIR --plain)" == 'true' ]] || error "ERROR: setup not setting enabled value for analytics"
 [[ "$("$DOPPLER_BINARY" configure flags get env-warning --config-dir=$TEST_CONFIG_DIR --plain)" == 'false' ]] || error "ERROR: setup not setting disabled value for env-warning"
 [[ "$("$DOPPLER_BINARY" configure flags get update-check --config-dir=$TEST_CONFIG_DIR --plain)" == 'false' ]] || error "ERROR: setup not setting disabled value for update-check"
 

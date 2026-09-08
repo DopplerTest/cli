@@ -37,6 +37,7 @@ func init() {
 			AgentEnvPath:     opts.AgentEnvPath,
 			PassthroughHosts: opts.PassthroughHosts,
 			UpstreamProxy:    opts.UpstreamProxy,
+			ProxyAuthToken:   opts.ProxyAuthToken,
 		})
 	})
 }

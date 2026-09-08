@@ -49,14 +49,10 @@ type Options struct {
 	AgentEnvPath     string
 	PassthroughHosts []string
 	UpstreamProxy    string
-	// InterceptHosts are extra hosts to MITM, used by engines (e.g. envoy) that
-	// need the intercept set declared up front. Ignored by engines that intercept
-	// every host on the fly (masked-hash).
-	InterceptHosts []string
-	// Signing / OAuth are per-host non-masking treatments for the envoy engine
-	// (AWS SigV4 signing / OAuth2 credential injection). Ignored by masked-hash.
-	Signing []SigningRoute
-	OAuth   []OAuthRoute
+	// ProxyAuthToken is a per-run credential the CLI mints; the engine requires it
+	// from every client (as a Basic Proxy-Authorization) and embeds it in the agent
+	// env so standard clients send it automatically.
+	ProxyAuthToken string
 }
 
 // Factory builds an Engine from Options.
@@ -64,6 +60,12 @@ type Factory func(opts Options) (Engine, error)
 
 // registry maps an engine name to its factory. Implementations populate it from
 // their package init(), which is what makes engines pluggable.
+//
+// An Envoy engine was prototyped and is intentionally NOT shipped in this binary.
+// It's preserved on the `austin/agent-proxy` branch (its adapter was pkg/proxy/
+// envoy.go; the Envoy data plane lives in the agent-proxy repo's `envoy/` package on
+// `austin/envoy-engine`). To bring it back, restore that adapter and its config
+// surface — it self-registers here. See ai-proxy-docs/envoy-parked.md and ENG-9728.
 var registry = map[string]Factory{}
 
 // Register makes an engine available under name.

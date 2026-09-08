@@ -39,24 +39,31 @@ beforeAll
 
 beforeEach
 
-# analytics defaults to enabled
+# analytics defaults to disabled
+status="$("$DOPPLER_BINARY" analytics status --configuration=./temp-config --json)"
+[[ "$status" == '{"enabled":false}' ]] || error "ERROR: analytics not disabled"
+
+beforeEach
+
+# analytics defaults to disabled after clearing config
+"$DOPPLER_BINARY" configure reset --configuration=./temp-config --yes
+status="$("$DOPPLER_BINARY" analytics status --configuration=./temp-config --json)"
+[[ "$status" == '{"enabled":false}' ]] || error "ERROR: analytics not disabled after reset"
+
+beforeEach
+
+# analytics defaults to disabled after enabling and then clearing config
+"$DOPPLER_BINARY" analytics enable --configuration=./temp-config >/dev/null 2>&1
+"$DOPPLER_BINARY" configure reset --configuration=./temp-config --yes
+status="$("$DOPPLER_BINARY" analytics status --configuration=./temp-config --json)"
+[[ "$status" == '{"enabled":false}' ]] || error "ERROR: analytics not disabled after enabling and resetting"
+
+beforeEach
+
+# analytics can be enabled
+"$DOPPLER_BINARY" analytics enable --configuration=./temp-config >/dev/null 2>&1
 status="$("$DOPPLER_BINARY" analytics status --configuration=./temp-config --json)"
 [[ "$status" == '{"enabled":true}' ]] || error "ERROR: analytics not enabled"
-
-beforeEach
-
-# analytics defaults to enabled after clearing config
-"$DOPPLER_BINARY" configure reset --configuration=./temp-config --yes
-status="$("$DOPPLER_BINARY" analytics status --configuration=./temp-config --json)"
-[[ "$status" == '{"enabled":true}' ]] || error "ERROR: analytics not enabled after reset"
-
-beforeEach
-
-# analytics defaults to enabled after disabling and then clearing config
-"$DOPPLER_BINARY" analytics disable --configuration=./temp-config >/dev/null 2>&1
-"$DOPPLER_BINARY" configure reset --configuration=./temp-config --yes
-status="$("$DOPPLER_BINARY" analytics status --configuration=./temp-config --json)"
-[[ "$status" == '{"enabled":true}' ]] || error "ERROR: analytics not enabled after diabling and resetting"
 
 beforeEach
 

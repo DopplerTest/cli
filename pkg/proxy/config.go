@@ -34,37 +34,6 @@ type ProxyConfig struct {
 	// Passthrough lists hostnames the proxy blind-tunnels instead of
 	// intercepting (no TLS termination, no injection).
 	Passthrough []string `yaml:"passthrough"`
-
-	// Intercept lists extra hostnames the Envoy engine (--engine envoy) should
-	// MITM, beyond those it infers from token shapes. It's the escape hatch for
-	// secrets whose values aren't recognizable tokens. Ignored by the default
-	// masked-hash engine, which intercepts every host automatically.
-	Intercept []string `yaml:"intercept"`
-
-	// Signing declares hosts the Envoy engine should sign with AWS SigV4 instead of
-	// masking. Envoy holds the AWS credentials (from its own environment).
-	Signing []SigningRoute `yaml:"signing"`
-
-	// OAuth declares hosts the Envoy engine should inject an OAuth2 client-
-	// credentials Bearer token into. Envoy runs the grant and holds the token.
-	OAuth []OAuthRoute `yaml:"oauth"`
-}
-
-// SigningRoute configures AWS SigV4 signing for a host (Envoy engine only).
-type SigningRoute struct {
-	Host    string `yaml:"host"`    // e.g. sts.amazonaws.com
-	Service string `yaml:"service"` // e.g. sts
-	Region  string `yaml:"region"`  // e.g. us-east-1
-}
-
-// OAuthRoute configures OAuth2 credential injection for a host (Envoy engine only).
-type OAuthRoute struct {
-	Host          string `yaml:"host"`           // e.g. api.spotify.com
-	TokenEndpoint string `yaml:"token_endpoint"` // e.g. https://accounts.spotify.com/api/token
-	ClientID      string `yaml:"client_id"`
-	// ClientSecretRef names a Doppler secret whose VALUE is the OAuth client secret.
-	ClientSecretRef string   `yaml:"client_secret_ref"`
-	Scopes          []string `yaml:"scopes"`
 }
 
 // starterConfig is written on first run so the operator has an editable file,
@@ -73,8 +42,11 @@ type OAuthRoute struct {
 const starterConfig = `# doppler-proxy.yaml — configuration for the Doppler agent credential proxy.
 # Edit this file, then restart the proxy to apply changes.
 
-# Address the proxy listens on. 0.0.0.0 lets the ` + "`doppler agent run`" + ` sandbox
-# container reach it; change to 127.0.0.1 to bind loopback only. --address overrides.
+# Address the proxy listens on. 0.0.0.0 serves both host tools (via 127.0.0.1) and
+# the ` + "`doppler agent run`" + ` sandbox container (via the docker bridge). Every client
+# must present the per-run proxy token, so a broad bind is not an open proxy. Set
+# 127.0.0.1 to bind loopback only (the sandbox container cannot reach that).
+# --address overrides this.
 listen_address: 0.0.0.0:14322
 
 # Hosts the proxy BLIND-TUNNELS instead of intercepting: no TLS termination and
@@ -90,34 +62,6 @@ passthrough:
   - claude.com
   - statsig.anthropic.com
   - sentry.io
-
-# Hosts the Envoy engine (--engine envoy) additionally INTERCEPTS, on top of the
-# ones it infers from your secrets' token shapes (e.g. ghp_… -> api.github.com).
-# Add API hosts whose secrets aren't recognizable tokens. Only the envoy engine
-# reads this; the default masked-hash engine intercepts every host automatically.
-# intercept:
-#   - api.internal.example.com
-
-# Most setups need NOTHING below — the envoy engine auto-configures from your
-# Doppler secret NAMES:
-#   ghp_... value                                -> masked injection to github
-#   AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY    -> AWS SigV4 signing to STS
-#                                                   (region from AWS_REGION, else us-east-1)
-#   SPOTIFY_CLIENT_ID + SPOTIFY_CLIENT_SECRET    -> OAuth2 injection to api.spotify.com
-# The blocks below are ONLY for hosts/providers that aren't auto-detected.
-
-# Extra AWS services beyond the auto-signed STS default:
-# signing:
-#   - host: s3.amazonaws.com
-#     service: s3
-#     region: us-east-1
-
-# OAuth providers not built in (client_secret_ref names a Doppler secret):
-# oauth:
-#   - host: api.example.com
-#     token_endpoint: https://auth.example.com/oauth/token
-#     client_id: your-client-id
-#     client_secret_ref: EXAMPLE_CLIENT_SECRET
 `
 
 // LoadOrScaffold loads the proxy config from path. If the file does not exist it
@@ -153,12 +97,6 @@ func parseProxyConfig(data []byte) (*ProxyConfig, error) {
 // de-duplicated and order-preserving (config entries first).
 func MergePassthrough(cfg *ProxyConfig, extra []string) []string {
 	return mergeHostLists(cfg.Passthrough, extra)
-}
-
-// MergeIntercept returns the config's intercept hosts plus any extras,
-// de-duplicated and order-preserving (config entries first).
-func MergeIntercept(cfg *ProxyConfig, extra []string) []string {
-	return mergeHostLists(cfg.Intercept, extra)
 }
 
 func mergeHostLists(base, extra []string) []string {

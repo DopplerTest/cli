@@ -28,6 +28,12 @@ Note that this will require approval from a CLI admin before the action will be 
 
 - **Fix**: `export GPG_TTY=$(tty)`
 
+**Issue**: `exec format error`, or `apk` failing, during `make test-release`
+
+- **Fix**: register binfmt handlers: `docker run --privileged --rm tonistiigi/binfmt --install arm64`
+
+- **Why**: `docker/alpine` runs `apk` inside the target architecture's image, which requires emulation when building for a non-native platform.
+
 **Issue**: After releasing, your personal account is logged out of the docker daemon
 
 - **Fix**: Log in again with this registry manually specified: `docker login https://docker.io`
