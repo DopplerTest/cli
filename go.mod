@@ -26,6 +26,8 @@ require (
 )
 
 require (
+	github.com/aws/aws-sdk-go-v2 v1.46.0 // indirect
+	github.com/aws/smithy-go v1.28.1 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 )
