@@ -282,6 +282,9 @@ var agentEnforceCmd = &cobra.Command{
 			utils.HandleError(fmt.Errorf("agent user %q not found: %w. Create it (the devcontainer feature does this) or pass --agent-user", agentUser, err))
 		}
 		uid, gid, groups := resolveUser(u)
+		if uid == 0 || gid == 0 {
+			utils.HandleError(fmt.Errorf("agent user %q resolves to uid %d gid %d, and enforce cannot lower root to root. Pass --agent-user with an unprivileged account", agentUser, uid, gid))
+		}
 
 		// The firewall rule needs an IP; the proxy env keeps the host name.
 		proxyIP := proxyHost
