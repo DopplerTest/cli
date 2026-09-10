@@ -22,6 +22,7 @@ import (
 
 	"github.com/DopplerHQ/cli/pkg/models"
 	"github.com/DopplerHQ/cli/pkg/utils"
+	"github.com/DopplerHQ/cli/pkg/version"
 )
 
 type oldConfig struct {
@@ -30,7 +31,10 @@ type oldConfig struct {
 	Key         string
 }
 
-var jsonFile = filepath.Join(utils.HomeDir(), ".doppler.json")
+// The legacy JSON config follows the build's brand (~/.doppler.json for doppler,
+// ~/.doppler-agent.json for the agent build), so a rebuilt binary never migrates the
+// production CLI's config into its own.
+var jsonFile = filepath.Join(utils.HomeDir(), version.ConfigDirName+".json")
 
 func jsonExists() bool {
 	return utils.Exists(jsonFile)
