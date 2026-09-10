@@ -80,7 +80,9 @@ var proxyStartCmd = &cobra.Command{
 		if logPath == "" {
 			logPath = filepath.Join(dataDir, "proxy.log")
 		}
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		// Append: this file is the only record of what was injected, denied and
+		// refused, and restarting to pick up a config edit would otherwise erase it.
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			utils.HandleError(err, "unable to open proxy log file")
 		}
