@@ -11,7 +11,9 @@
 set -eu
 
 BUCKET="${DOPPLER_AGENT_BUCKET:-doppler-proxy-alpha}"
-BASE="https://storage.googleapis.com/${BUCKET}/doppler-agent"
+# Base URL the artifacts are served from. Override to point at a mirror, a signed-URL
+# host, or a local server for testing; defaults to the public GCS bucket.
+BASE="${DOPPLER_AGENT_BASE_URL:-https://storage.googleapis.com/${BUCKET}/doppler-agent}"
 INSTALL_DIR="${DOPPLER_AGENT_INSTALL_DIR:-/usr/local/bin}"
 
 log() { printf '%s\n' "$*" >&2; }
@@ -19,6 +21,15 @@ fail() { log "ERROR: $*"; exit 1; }
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v tar >/dev/null 2>&1 || fail "tar is required"
+
+# Enforce TLS for real (https) downloads. The non-https branch is a TESTING HOOK ONLY
+# (a local server or CI): it drops TLS, and because the checksum is fetched from the same
+# base it can't detect a hostile mirror — never point DOPPLER_AGENT_BASE_URL at an
+# untrusted non-https host.
+case "$BASE" in
+  https://*) DL="curl -fsSL --proto =https --tlsv1.2" ;;
+  *)         DL="curl -fsSL" ;; # testing only — see the note above
+esac
 
 # --- OS ---
 case "$(uname -s)" in
@@ -36,7 +47,7 @@ esac
 
 # --- version: an explicit override, else the `latest` marker the release workflow writes ---
 version="${DOPPLER_AGENT_VERSION:-}"
-[ -n "$version" ] || version="$(curl -fsSL "${BASE}/latest")" || fail "could not read the latest version from ${BASE}/latest"
+[ -n "$version" ] || version="$($DL "${BASE}/latest")" || fail "could not read the latest version from ${BASE}/latest"
 version="${version#v}" # goreleaser paths/names use the version without a leading 'v'
 
 archive="doppler-agent_${version}_${os}_${arch}.tar.gz"
@@ -46,17 +57,15 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 log "Downloading ${archive} …"
-curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "${tmp}/${archive}" || fail "download failed: $url"
+$DL "$url" -o "${tmp}/${archive}" || fail "download failed: $url"
 
-# --- verify checksum (best-effort: the checksums file is published alongside) ---
-if curl -fsSL "${BASE}/${version}/checksums.txt" -o "${tmp}/checksums.txt" 2>/dev/null; then
-  want="$(grep " ${archive}\$" "${tmp}/checksums.txt" | awk '{print $1}')"
-  if [ -n "$want" ]; then
-    got="$( (command -v sha256sum >/dev/null 2>&1 && sha256sum "${tmp}/${archive}" || shasum -a 256 "${tmp}/${archive}") | awk '{print $1}')"
-    [ "$want" = "$got" ] || fail "checksum mismatch for ${archive} (want ${want}, got ${got})"
-    log "Checksum verified."
-  fi
-fi
+# --- verify checksum (fail closed: no verifiable checksum means no install) ---
+$DL "${BASE}/${version}/checksums.txt" -o "${tmp}/checksums.txt" || fail "could not download checksums.txt to verify ${archive}"
+want="$(grep " ${archive}\$" "${tmp}/checksums.txt" | awk '{print $1}')"
+[ -n "$want" ] || fail "no checksum listed for ${archive} in checksums.txt"
+got="$( (command -v sha256sum >/dev/null 2>&1 && sha256sum "${tmp}/${archive}" || shasum -a 256 "${tmp}/${archive}") | awk '{print $1}')"
+[ "$want" = "$got" ] || fail "checksum mismatch for ${archive} (want ${want}, got ${got})"
+log "Checksum verified."
 
 tar -xzf "${tmp}/${archive}" -C "$tmp" doppler-agent || fail "could not extract doppler-agent from the archive"
 
