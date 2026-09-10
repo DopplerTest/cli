@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -119,5 +120,24 @@ func TestDeveloperHomeFollowsSudoUser(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	if got := developerHome(); got != home {
 		t.Fatalf("developerHome without sudo = %q, want %q", got, home)
+	}
+}
+
+// enforce runs under sudo, so the platform default would resolve the proxy's
+// artifacts under root's home rather than the developer's.
+func TestProxyArtifactDirFollowsDeveloper(t *testing.T) {
+	me, err := user.Current()
+	if err != nil {
+		t.Skip(err)
+	}
+	t.Setenv("HOME", "/root")
+	t.Setenv("SUDO_USER", me.Username)
+	got := proxyArtifactDir("")
+	if !strings.HasPrefix(got, me.HomeDir) {
+		t.Fatalf("proxy artifacts resolved to %q, want them under %q", got, me.HomeDir)
+	}
+	// Control: the flag still wins.
+	if got := proxyArtifactDir("/tmp/elsewhere"); got != "/tmp/elsewhere" {
+		t.Fatalf("--proxy-data-dir must win, got %q", got)
 	}
 }

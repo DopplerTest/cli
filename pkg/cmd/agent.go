@@ -230,6 +230,16 @@ func credentialSources(devHome, dataDir string) []string {
 	return out
 }
 
+// proxyArtifactDir is where `doppler proxy start` left the CA and agent.env. enforce
+// runs under sudo, where HOME is root's, so the platform default would look in the
+// wrong home; the proxy wrote them as the developer.
+func proxyArtifactDir(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return dataDirUnder(developerHome())
+}
+
 // dataDirUnder is agentproxy.DefaultDataDir for another user's home, following
 // the platform default. --proxy-data-dir covers an XDG_CONFIG_HOME override.
 func dataDirUnder(home string) string {
@@ -283,17 +293,19 @@ var agentEnforceCmd = &cobra.Command{
 			proxyIP = ips[0]
 		}
 
-		// CA path: flag, else default on-disk location.
+		// CA path: flag, else the proxy's data dir under the DEVELOPER's home.
+		proxyDataDir, _ := cmd.Flags().GetString("proxy-data-dir")
+		proxyDataDir = proxyArtifactDir(proxyDataDir)
 		caPath, _ := cmd.Flags().GetString("ca")
 		if caPath == "" {
-			caPath = agentproxy.CACertPath(agentproxy.DefaultDataDir())
+			caPath = agentproxy.CACertPath(proxyDataDir)
 		}
 
 		// Build the agent env from the proxy's agent.env, repointing the proxy and
 		// CA vars at this boundary and stripping anything the agent must not hold.
 		envPath, _ := cmd.Flags().GetString("agent-env")
 		if envPath == "" {
-			envPath = agentproxy.AgentEnvPath(agentproxy.DefaultDataDir())
+			envPath = agentproxy.AgentEnvPath(proxyDataDir)
 		}
 		rawEnv, err := os.ReadFile(envPath)
 		if err != nil {
