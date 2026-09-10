@@ -21,6 +21,12 @@ jobs:
         with:
           go-version: '1.25' # GO_VERSION_DEF
           check-latest: true
+      - name: Authenticate to the private agent-proxy module
+        run: |
+          git config --global url."https://x-access-token:${AGENT_PROXY_READ_TOKEN}@github.com/DopplerTest/".insteadOf "https://github.com/DopplerTest/"
+          echo "GOPRIVATE=github.com/DopplerTest/*" >> "$GITHUB_ENV"
+        env:
+          AGENT_PROXY_READ_TOKEN: ${{ secrets.AGENT_PROXY_READ_TOKEN }}
       - name: Get official govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
         shell: bash
