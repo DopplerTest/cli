@@ -13,7 +13,7 @@ name: release-demo
 #   AGENT_PROXY_PAT — token with read access to DopplerTest/agent-proxy, so `go` can fetch
 #                     the private module during the build. (Interim: migrate to a GitHub
 #                     App token later — swap this for a create-github-app-token mint step.)
-# And replace PLACEHOLDER_DEMO_BUCKET below with the real bucket once infra provisions it.
+# Publishes to the doppler-proxy-alpha GCS bucket (objects must be public-read for install).
 
 on:
   workflow_dispatch:
@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 env:
-  DEMO_BUCKET: PLACEHOLDER_DEMO_BUCKET # TODO(infra): real demo GCS bucket
+  DEMO_BUCKET: doppler-proxy-alpha
 
 jobs:
   release:

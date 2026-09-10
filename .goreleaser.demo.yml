@@ -67,5 +67,5 @@ release:
 # (a demo service-account key), the same mechanism the production release uses.
 blobs:
   - provider: gs
-    bucket: PLACEHOLDER_DEMO_BUCKET # TODO(infra): replace with the real demo GCS bucket
+    bucket: doppler-proxy-alpha
     directory: "doppler-agent/{{ .Version }}"

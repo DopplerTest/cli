@@ -4,13 +4,13 @@
 # the production scripts/install.sh: no package managers, no GPG — just fetch the archive
 # for this OS/arch, verify its sha256, and drop `doppler-agent` on PATH.
 #
-#   curl -fsSL https://storage.googleapis.com/PLACEHOLDER_DEMO_BUCKET/install.sh | sh
+#   curl -fsSL https://storage.googleapis.com/doppler-proxy-alpha/install.sh | sh
 #
 # It installs `doppler-agent` (never `doppler`), so it can't collide with a production
 # Doppler CLI, and the binary keeps its state in ~/.doppler-agent.
 set -eu
 
-BUCKET="${DOPPLER_AGENT_BUCKET:-PLACEHOLDER_DEMO_BUCKET}" # TODO(infra): real demo bucket
+BUCKET="${DOPPLER_AGENT_BUCKET:-doppler-proxy-alpha}"
 BASE="https://storage.googleapis.com/${BUCKET}/doppler-agent"
 INSTALL_DIR="${DOPPLER_AGENT_INSTALL_DIR:-/usr/local/bin}"
 
