@@ -9,9 +9,10 @@ name: release-demo
 # customer never touches it: agent-proxy is statically linked into the shipped binary.
 #
 # Secrets used (demo-scoped, distinct from the production release):
-#   GCP_KEY_DEMO       — service-account key with write access to the demo bucket.
-#   GH_APP_ID          \ GitHub App (installed on DopplerTest with agent-proxy Contents:Read)
-#   GH_APP_PRIVATE_KEY / used to mint a short-lived token so `go` can fetch the private module.
+#   GCP_KEY_DEMO    — service-account key with write access to the demo bucket.
+#   AGENT_PROXY_PAT — token with read access to DopplerTest/agent-proxy, so `go` can fetch
+#                     the private module during the build. (Interim: migrate to a GitHub
+#                     App token later — swap this for a create-github-app-token mint step.)
 # And replace PLACEHOLDER_DEMO_BUCKET below with the real bucket once infra provisions it.
 
 on:
@@ -42,14 +43,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Mint a token for the private agent-proxy module
-        id: agent-proxy-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.GH_APP_ID }}
-          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: agent-proxy
       - name: Private module access (github.com/DopplerTest/agent-proxy)
         run: |
           git config --global \
@@ -57,7 +50,7 @@ jobs:
             "https://github.com/DopplerTest/"
           echo "GOPRIVATE=github.com/DopplerTest/*" >> "$GITHUB_ENV"
         env:
-          TOKEN: ${{ steps.agent-proxy-token.outputs.token }}
+          TOKEN: ${{ secrets.AGENT_PROXY_PAT }}
 
       - name: Tag this commit for goreleaser
         run: git tag "v${{ inputs.version }}"

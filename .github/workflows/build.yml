@@ -15,20 +15,12 @@ jobs:
       uses: actions/checkout@50fbc622fc4ef5163becd7fab6573eac35f8462e # v1.2.0
       with:
         path: ./src/github.com/${{ github.repository }}
-    - name: Mint a token for the private agent-proxy module
-      id: agent-proxy-token
-      uses: actions/create-github-app-token@v1
-      with:
-        app-id: ${{ secrets.GH_APP_ID }}
-        private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-        owner: ${{ github.repository_owner }}
-        repositories: agent-proxy
     - name: Authenticate to the private agent-proxy module
       run: |
         git config --global url."https://x-access-token:${TOKEN}@github.com/DopplerTest/".insteadOf "https://github.com/DopplerTest/"
         echo "GOPRIVATE=github.com/DopplerTest/*" >> "$GITHUB_ENV"
       env:
-        TOKEN: ${{ steps.agent-proxy-token.outputs.token }}
+        TOKEN: ${{ secrets.AGENT_PROXY_PAT }}
     - name: Build
       run: make build
       env:
