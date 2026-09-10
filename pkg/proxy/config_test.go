@@ -288,3 +288,42 @@ func TestParseRejectsUnknownKeys(t *testing.T) {
 		t.Fatalf("config did not load: %+v", cfg)
 	}
 }
+
+// An entry an operator writes to restrict a secret has to restrict it, or say why not.
+func TestValidateRejectsToothlessBindings(t *testing.T) {
+	for name, body := range map[string]string{
+		"no rules":   "bindings:\n  GITHUB_TOKEN:\n",
+		"empty list": "bindings:\n  GITHUB_TOKEN: []\n",
+		"no host":    "bindings:\n  GITHUB_TOKEN:\n    - paths: [\"/repos/**\"]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseProxyConfig([]byte(body)); err == nil {
+				t.Fatal("this binding does not restrict anything and must be rejected")
+			}
+		})
+	}
+	// Control: a real binding loads.
+	if _, err := parseProxyConfig([]byte("bindings:\n  GITHUB_TOKEN:\n    - host: api.github.com\n")); err != nil {
+		t.Fatalf("a well-formed binding must load, got %v", err)
+	}
+}
+
+// A bad credential method used to surface as a failed injection mid-run.
+func TestValidateRejectsIncompleteMethods(t *testing.T) {
+	for name, body := range map[string]string{
+		"unknown kind":  "methods:\n  KEY:\n    kind: oauth2\n",
+		"oauth missing": "methods:\n  KEY:\n    kind: oauth2_client_credentials\n    client_id: cid\n",
+		"sigv4 missing": "methods:\n  KEY:\n    kind: aws_sigv4\n    region: us-east-1\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseProxyConfig([]byte(body)); err == nil {
+				t.Fatal("an unusable method must be rejected at load")
+			}
+		})
+	}
+	// Control: complete declarations load.
+	ok := "methods:\n  A:\n    kind: oauth2_client_credentials\n    token_url: https://example.com/t\n    client_id: cid\n  B:\n    kind: aws_sigv4\n    service: s3\n    access_key_id: AWS_KEY_ID\n"
+	if _, err := parseProxyConfig([]byte(ok)); err != nil {
+		t.Fatalf("complete methods must load, got %v", err)
+	}
+}

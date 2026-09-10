@@ -76,6 +76,37 @@ type CredentialMethod struct {
 	AccessKeyID string `yaml:"access_key_id"`
 }
 
+// Validate reports a configuration the proxy would accept but the operator did not
+// mean: an entry that reads like a restriction and silently is not one.
+func (c *ProxyConfig) Validate() error {
+	for name, rules := range c.Bindings {
+		if len(rules) == 0 {
+			return fmt.Errorf("bindings: %s has no rules, so it falls under the unbound policy rather than being restricted. Give it a host, or remove the entry", name)
+		}
+		for i, r := range rules {
+			if strings.TrimSpace(r.Host) == "" {
+				return fmt.Errorf("bindings: %s rule %d has no host, so the secret is refused everywhere. Set host", name, i+1)
+			}
+		}
+	}
+	for name, m := range c.Methods {
+		switch m.Kind {
+		case "", "static":
+		case "oauth2_client_credentials":
+			if m.TokenURL == "" || m.ClientID == "" {
+				return fmt.Errorf("methods: %s needs token_url and client_id for oauth2_client_credentials", name)
+			}
+		case "aws_sigv4":
+			if m.Service == "" || m.AccessKeyID == "" {
+				return fmt.Errorf("methods: %s needs service and access_key_id for aws_sigv4", name)
+			}
+		default:
+			return fmt.Errorf("methods: %s has kind %q, want static, oauth2_client_credentials or aws_sigv4", name, m.Kind)
+		}
+	}
+	return nil
+}
+
 // BindingResolver builds the resolver the proxy authorizes injection with.
 func (c *ProxyConfig) BindingResolver() (agentproxy.BindingResolver, error) {
 	var policy agentproxy.UnboundPolicy
@@ -255,6 +286,9 @@ func parseProxyConfig(data []byte) (*ProxyConfig, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%w. Check the key names against the comments in the file", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
 }
