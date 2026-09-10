@@ -259,3 +259,32 @@ func TestParsePassByValue(t *testing.T) {
 		t.Fatalf("pass_by_value = %v", cfg.PassByValue)
 	}
 }
+
+// A misspelled key would otherwise load clean and leave the setting off, which is
+// silent: the agent just gets a 401 with nothing in the log naming the cause.
+func TestParseRejectsUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doppler-proxy.yaml")
+	body := "listen_address: 127.0.0.1:9999\npass-by-value:\n  - MODEL_TOKEN\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadOrScaffold(path, func() []string { return nil }); err == nil {
+		t.Fatal("a misspelled key must fail the load")
+	} else if !strings.Contains(err.Error(), "pass-by-value") {
+		t.Fatalf("the error should name the key, got %v", err)
+	}
+
+	// Control: the correct spelling loads.
+	good := "listen_address: 127.0.0.1:9999\npass_by_value:\n  - MODEL_TOKEN\n"
+	if err := os.WriteFile(path, []byte(good), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadOrScaffold(path, func() []string { return nil })
+	if err != nil {
+		t.Fatalf("a correct config must load, got %v", err)
+	}
+	if len(cfg.PassByValue) != 1 || cfg.ListenAddress != "127.0.0.1:9999" {
+		t.Fatalf("config did not load: %+v", cfg)
+	}
+}

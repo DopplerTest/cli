@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -247,8 +248,13 @@ func LoadOrScaffold(path string, secretNames func() []string) (cfg *ProxyConfig,
 
 func parseProxyConfig(data []byte) (*ProxyConfig, error) {
 	var cfg ProxyConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+	// Strict decoding: a misspelled key would otherwise load clean and leave the
+	// setting off, so `pass-by-value` would mask the model token and the agent would
+	// see a 401 with nothing in the log pointing at the config.
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%w. Check the key names against the comments in the file", err)
 	}
 	return &cfg, nil
 }
