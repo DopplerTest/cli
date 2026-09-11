@@ -52,9 +52,6 @@ jobs:
         env:
           TOKEN: ${{ secrets.AGENT_PROXY_PAT }}
 
-      - name: Tag this commit for goreleaser
-        run: git tag "v${{ inputs.version }}"
-
       - name: Write GCP credentials
         run: |
           printf '%s' "$GCP_KEY_DEMO" > "$RUNNER_TEMP/gcp.json"
@@ -72,7 +69,15 @@ jobs:
         run: goreleaser check -f .goreleaser.demo.yml
 
       - name: Build + upload archives to GCS
-        run: goreleaser release -f .goreleaser.demo.yml --clean
+        # No git tag: the demo owns its own version, decoupled from the CLI's vX.Y.Z tag
+        # history (the fork inherits those back to 2019, so `git tag v0.1.1` collides).
+        # GORELEASER_CURRENT_TAG feeds goreleaser the version directly; --skip=validate
+        # drops the "tag points at HEAD" check (there's no tag) and the dirty-tree check
+        # (a fresh CI checkout is clean anyway). --snapshot is not an option — it rewrites
+        # the version to 0.1.1-SNAPSHOT-<sha>, which stops matching the install-demo.sh name.
+        run: goreleaser release -f .goreleaser.demo.yml --clean --skip=validate
+        env:
+          GORELEASER_CURRENT_TAG: v${{ inputs.version }}
 
       - name: Publish the latest marker + install script
         run: |
