@@ -55,7 +55,11 @@ jobs:
       - name: Write GCP credentials
         run: |
           printf '%s' "$GCP_KEY_DEMO" > "$RUNNER_TEMP/gcp.json"
+          # goreleaser's GCS upload reads GOOGLE_APPLICATION_CREDENTIALS (ADC); the gcloud
+          # CLI does not, so it needs the service account explicitly activated for the
+          # latest-marker + install.sh copies below.
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp.json" >> "$GITHUB_ENV"
+          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/gcp.json"
         env:
           GCP_KEY_DEMO: ${{ secrets.GCP_KEY_DEMO }}
 
