@@ -62,6 +62,11 @@ checksum:
 release:
   disable: true
 
+# The version comes from GORELEASER_CURRENT_TAG (see release-demo.yml), not a git tag, so
+# there's no previous tag to diff against — skip the changelog entirely.
+changelog:
+  disable: true
+
 # Upload the archives + checksums to GCS. The bucket is a placeholder until infra
 # provisions one; the workflow authenticates with GOOGLE_APPLICATION_CREDENTIALS
 # (a demo service-account key), the same mechanism the production release uses.
