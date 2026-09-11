@@ -15,6 +15,12 @@ jobs:
       uses: actions/checkout@50fbc622fc4ef5163becd7fab6573eac35f8462e # v1.2.0
       with:
         path: ./src/github.com/${{ github.repository }}
+    - name: Authenticate to the private agent-proxy module
+      run: |
+        git config --global url."https://x-access-token:${TOKEN}@github.com/DopplerTest/".insteadOf "https://github.com/DopplerTest/"
+        echo "GOPRIVATE=github.com/DopplerTest/*" >> "$GITHUB_ENV"
+      env:
+        TOKEN: ${{ secrets.AGENT_PROXY_PAT }}
     - name: Build
       run: make build
       env:

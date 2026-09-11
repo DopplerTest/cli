@@ -31,11 +31,12 @@ import (
 	"strings"
 	"syscall"
 
-	agentproxy "github.com/DopplerHQ/agent-proxy"
-	"github.com/DopplerHQ/agent-proxy/enforce"
-	"github.com/DopplerHQ/agent-proxy/sandbox"
-	"github.com/DopplerHQ/agent-proxy/verify"
 	"github.com/DopplerHQ/cli/pkg/utils"
+	"github.com/DopplerHQ/cli/pkg/version"
+	agentproxy "github.com/DopplerTest/agent-proxy"
+	"github.com/DopplerTest/agent-proxy/enforce"
+	"github.com/DopplerTest/agent-proxy/sandbox"
+	"github.com/DopplerTest/agent-proxy/verify"
 	"github.com/spf13/cobra"
 )
 
@@ -222,7 +223,7 @@ func developerHome() string {
 func credentialSources(devHome, dataDir string) []string {
 	var out []string
 	if devHome != "" {
-		out = append(out, filepath.Join(devHome, ".doppler", ".doppler.yaml"))
+		out = append(out, filepath.Join(devHome, version.ConfigDirName, version.ConfigFileName))
 	}
 	if dataDir != "" {
 		out = append(out, filepath.Join(dataDir, "ca.key"))
