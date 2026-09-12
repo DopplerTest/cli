@@ -33,7 +33,7 @@ require (
 )
 
 require (
-	github.com/DopplerTest/agent-proxy v0.1.1
+	github.com/DopplerTest/agent-proxy v0.1.2
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
