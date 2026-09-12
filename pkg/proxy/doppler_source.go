@@ -50,16 +50,27 @@ func (s *dopplerSource) load() (map[string]string, error) {
 	if !err.IsNil() {
 		return nil, err.Unwrap()
 	}
-	m := make(map[string]string, len(computed))
-	for name, cs := range computed {
-		if cs.ComputedValue != nil {
-			m[name] = *cs.ComputedValue
-		}
-	}
+	m := brokerableSecrets(computed)
 	s.mu.Lock()
 	s.secrets = m
 	s.mu.Unlock()
 	return m, nil
+}
+
+// brokerableSecrets keeps the secrets worth masking. Doppler's own metadata is
+// not a credential, and masking it breaks the tools that read it — the mask
+// lands in the API query string, which the proxy then refuses.
+func brokerableSecrets(computed map[string]models.ComputedSecret) map[string]string {
+	m := make(map[string]string, len(computed))
+	for name, cs := range computed {
+		if name == "DOPPLER_CONFIG" || name == "DOPPLER_ENVIRONMENT" || name == "DOPPLER_PROJECT" {
+			continue
+		}
+		if cs.ComputedValue != nil {
+			m[name] = *cs.ComputedValue
+		}
+	}
+	return m
 }
 
 func (s *dopplerSource) List(_ context.Context) ([]string, error) {
