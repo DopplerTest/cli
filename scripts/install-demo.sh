@@ -7,7 +7,9 @@
 #   curl -fsSL https://storage.googleapis.com/doppler-proxy-alpha/install.sh | sh
 #
 # It installs `doppler-agent` (never `doppler`), so it can't collide with a production
-# Doppler CLI, and the binary keeps its state in ~/.doppler-agent.
+# Doppler CLI. Its CLI config lives in ~/.doppler-agent; the proxy keeps its own data
+# (CA, agent env, logs) in ~/.config/agent-proxy, or ~/Library/Application Support/
+# agent-proxy on macOS.
 set -eu
 
 BUCKET="${DOPPLER_AGENT_BUCKET:-doppler-proxy-alpha}"
