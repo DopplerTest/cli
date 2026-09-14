@@ -26,6 +26,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"text/template"
 	"time"
@@ -148,23 +150,11 @@ func MountSecrets(secrets []byte, mountPath string, maxReads int) (string, func(
 		return "", nil, Error{Err: err, Message: "Unable to mount secrets file"}
 	}
 
-	fifoCleanupStarted := false
+	var fifoCleanupStarted atomic.Bool
 
-	// cleanup named pipe on exit
-	cleanupFIFO := func() {
-		fifoCleanupStarted = true
-
-		utils.LogDebug(fmt.Sprintf("Deleting secrets mount %s", mountPath))
-		if err := os.Remove(mountPath); err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				// ignore
-				return
-			}
-
-			utils.LogDebug("Unable to delete secrets mount")
-			utils.LogError(err)
-		}
-	}
+	// The writer and caller can both finish at once. Each cleanup waits for
+	// removal to finish, so returning cannot race process exit against unlink.
+	cleanupFIFO := makeFIFOCleanup(mountPath, &fifoCleanupStarted, os.Remove)
 
 	utils.LogDebug(fmt.Sprintf("Mounting secrets to %s", mountPath))
 
@@ -185,7 +175,7 @@ func MountSecrets(secrets []byte, mountPath string, maxReads int) (string, func(
 			f, err := os.OpenFile(mountPath, os.O_WRONLY, os.ModeNamedPipe) // #nosec G304
 			if err != nil {
 				// race: cleanup has already begun; no need to error
-				if errors.Is(err, fs.ErrNotExist) && fifoCleanupStarted {
+				if errors.Is(err, fs.ErrNotExist) && fifoCleanupStarted.Load() {
 					break
 				}
 				cleanupFIFO()
@@ -199,7 +189,7 @@ func MountSecrets(secrets []byte, mountPath string, maxReads int) (string, func(
 
 			if _, err := f.Write(secrets); err != nil {
 				// race: cleanup has already begun; no need to error
-				if errors.Is(err, fs.ErrNotExist) && fifoCleanupStarted {
+				if errors.Is(err, fs.ErrNotExist) && fifoCleanupStarted.Load() {
 					break
 				}
 				// broken pipe occurs when reader closes pipe before writing completes (eg. with vite dev server)
@@ -215,7 +205,7 @@ func MountSecrets(secrets []byte, mountPath string, maxReads int) (string, func(
 
 			if err := f.Close(); err != nil {
 				// race: cleanup has already begun; no need to error
-				if errors.Is(err, fs.ErrNotExist) && fifoCleanupStarted {
+				if errors.Is(err, fs.ErrNotExist) && fifoCleanupStarted.Load() {
 					break
 				}
 				// broken pipe on close is safe to ignore - the reader has already disconnected
@@ -237,6 +227,25 @@ func MountSecrets(secrets []byte, mountPath string, maxReads int) (string, func(
 	}()
 
 	return mountPath, cleanupFIFO, Error{}
+}
+
+// makeFIFOCleanup keeps cleanup synchronous and idempotent. The removal seam
+// allows testing a slow unlink without changing process-global logging state.
+func makeFIFOCleanup(mountPath string, started *atomic.Bool, remove func(string) error) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			started.Store(true)
+			utils.LogDebug(fmt.Sprintf("Deleting secrets mount %s", mountPath))
+			if err := remove(mountPath); err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					return
+				}
+				utils.LogDebug("Unable to delete secrets mount")
+				utils.LogError(err)
+			}
+		})
+	}
 }
 
 func ReadTemplateFile(filePath string) string {
