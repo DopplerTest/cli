@@ -148,7 +148,6 @@ var proxyStartCmd = &cobra.Command{
 		if err != nil {
 			utils.HandleError(err, "invalid bindings in the proxy config")
 		}
-		warnShapeMismatches(opts.Binding, opts.Secrets)
 
 		engine, err := factory(opts)
 		if err != nil {
@@ -205,31 +204,6 @@ func engineOptions(cfg *proxy.ProxyConfig, in proxyStartInputs) (proxy.Options, 
 		Methods:               cfg.MethodConfigs(),
 		PassByValue:           cfg.PassByValue,
 	}, nil
-}
-
-// warnShapeMismatches logs each rule that points a recognizable token at another
-// provider's host. The rule still wins at runtime, since a proxy or an enterprise
-// host is a legitimate reason, but the mismatch is worth a look before the agent
-// finds out.
-func warnShapeMismatches(binding agentproxy.BindingResolver, secrets agentproxy.SecretSource) {
-	rules, ok := binding.(*agentproxy.RuleResolver)
-	if !ok {
-		return
-	}
-	ctx := context.Background()
-	names, err := secrets.List(ctx)
-	if err != nil {
-		return // the engine reports the load failure itself
-	}
-	values := make(map[string]string, len(names))
-	for _, name := range names {
-		if v, err := secrets.Fetch(ctx, agentproxy.SecretRef{Name: name}); err == nil {
-			values[name] = v
-		}
-	}
-	for _, warning := range rules.Validate(values) {
-		utils.LogWarning(warning)
-	}
 }
 
 func init() {
