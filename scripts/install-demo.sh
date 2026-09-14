@@ -46,8 +46,10 @@ case "$(uname -m)" in
 esac
 
 # --- version: an explicit override, else the `latest` marker the release workflow writes ---
+# Ask for the marker uncached. An edge that already holds an old copy would keep
+# installing the previous version, including one we published a fix to replace.
 version="${DOPPLER_AGENT_VERSION:-}"
-[ -n "$version" ] || version="$($DL "${BASE}/latest")" || fail "could not read the latest version from ${BASE}/latest"
+[ -n "$version" ] || version="$($DL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "${BASE}/latest")" || fail "could not read the latest version from ${BASE}/latest"
 version="${version#v}" # goreleaser paths/names use the version without a leading 'v'
 
 archive="doppler-agent_${version}_${os}_${arch}.tar.gz"
