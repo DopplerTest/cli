@@ -54,6 +54,23 @@ type ProxyConfig struct {
 	// PassByValue names secrets the agent holds for real rather than as a mask,
 	// typically its own model provider token whose host is passed through.
 	PassByValue []string `yaml:"pass_by_value"`
+
+	// ProtocolUpgrades is the policy for WebSocket and other protocol upgrades:
+	// "refuse" (the default) rejects the handshake, "tunnel" brokers it and then
+	// stops inspecting once frames start.
+	ProtocolUpgrades string `yaml:"protocol_upgrades"`
+}
+
+// AllowProtocolUpgrades maps the policy to the engine flag.
+func (c *ProxyConfig) AllowProtocolUpgrades() (bool, error) {
+	switch c.ProtocolUpgrades {
+	case "", "refuse":
+		return false, nil
+	case "tunnel":
+		return true, nil
+	default:
+		return false, fmt.Errorf("protocol_upgrades must be refuse or tunnel, got %q", c.ProtocolUpgrades)
+	}
 }
 
 // CredentialMethod is how a secret is brokered onto a request (doppler-proxy.yaml).
@@ -148,6 +165,12 @@ const starterConfigTail = `
 # logs the host it was sent to. trust-first-use pins it to the first host the
 # agent uses, which lets the agent decide where the credential goes.
 # unbound: deny
+
+# Policy for a request that asks to stop speaking HTTP (WebSocket and other
+# protocol upgrades). refuse rejects the handshake. tunnel brokers the handshake
+# and scrubs its response, then copies bytes both ways without inspecting them,
+# so a credential the agent already holds can leave over that stream unseen.
+# protocol_upgrades: refuse
 
 # Non-static credential methods, by secret name. A secret omitted here is injected as
 # its literal value (static). oauth2_client_credentials exchanges the secret for a
