@@ -259,3 +259,39 @@ func TestParsePassByValue(t *testing.T) {
 		t.Fatalf("pass_by_value = %v", cfg.PassByValue)
 	}
 }
+
+func TestAllowProtocolUpgrades(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		allow bool
+		bad   bool
+	}{
+		{value: "", allow: false},
+		{value: "refuse", allow: false},
+		{value: "tunnel", allow: true},
+		{value: "yes", bad: true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			allow, err := (&ProxyConfig{ProtocolUpgrades: tc.value}).AllowProtocolUpgrades()
+			if tc.bad {
+				if err == nil || !strings.Contains(err.Error(), "refuse or tunnel") {
+					t.Fatalf("expected a named-values error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if allow != tc.allow {
+				t.Fatalf("allow = %v, want %v", allow, tc.allow)
+			}
+		})
+	}
+}
+
+// The scaffold has to document the knob, commented out at its safe default.
+func TestStarterConfigDocumentsProtocolUpgrades(t *testing.T) {
+	if !strings.Contains(starterConfigTail, "# protocol_upgrades: refuse") {
+		t.Fatal("scaffolded config does not document protocol_upgrades")
+	}
+}

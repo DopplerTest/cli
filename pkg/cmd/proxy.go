@@ -29,10 +29,10 @@ import (
 	"strings"
 	"syscall"
 
-	agentproxy "github.com/DopplerTest/agent-proxy"
 	"github.com/DopplerHQ/cli/pkg/configuration"
 	"github.com/DopplerHQ/cli/pkg/proxy"
 	"github.com/DopplerHQ/cli/pkg/utils"
+	agentproxy "github.com/DopplerTest/agent-proxy"
 	"github.com/spf13/cobra"
 )
 
@@ -183,22 +183,27 @@ func engineOptions(cfg *proxy.ProxyConfig, in proxyStartInputs) (proxy.Options, 
 	if err != nil {
 		return proxy.Options{}, err
 	}
+	allowUpgrades, err := cfg.AllowProtocolUpgrades()
+	if err != nil {
+		return proxy.Options{}, err
+	}
 	secrets := agentproxy.NewRefreshingSource(in.source, agentproxy.RefreshOptions{
 		Logf: func(format string, args ...any) { fmt.Fprintf(in.logOut, format+"\n", args...) },
 	})
 	return proxy.Options{
-		ListenAddr:         in.address,
-		Secrets:            secrets,
-		DataDir:            in.dataDir,
-		LogWriter:          in.logOut,
-		AgentEnvPath:       agentproxy.AgentEnvPath(in.dataDir),
-		PassthroughHosts:   in.passthrough,
-		UpstreamProxy:      in.upstreamProxy,
-		ProxyAuthToken:     in.proxyToken,
-		Binding:            binding,
-		AllowPrivateEgress: in.allowPrivateEgress,
-		Methods:            cfg.MethodConfigs(),
-		PassByValue:        cfg.PassByValue,
+		ListenAddr:            in.address,
+		Secrets:               secrets,
+		DataDir:               in.dataDir,
+		LogWriter:             in.logOut,
+		AgentEnvPath:          agentproxy.AgentEnvPath(in.dataDir),
+		PassthroughHosts:      in.passthrough,
+		UpstreamProxy:         in.upstreamProxy,
+		ProxyAuthToken:        in.proxyToken,
+		Binding:               binding,
+		AllowPrivateEgress:    in.allowPrivateEgress,
+		AllowProtocolUpgrades: allowUpgrades,
+		Methods:               cfg.MethodConfigs(),
+		PassByValue:           cfg.PassByValue,
 	}, nil
 }
 

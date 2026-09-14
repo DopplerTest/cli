@@ -59,6 +59,9 @@ type Options struct {
 	// AllowPrivateEgress lets the proxy connect to loopback and private-network
 	// addresses, for local development against a local upstream.
 	AllowPrivateEgress bool
+	// AllowProtocolUpgrades lets a WebSocket or other protocol upgrade through,
+	// after which its frames are not inspected.
+	AllowProtocolUpgrades bool
 	// Methods declares a non-static credential brokering method per secret name
 	// (OAuth2 client-credentials, AWS SigV4). Empty means every secret is static.
 	Methods map[string]agentproxy.MethodConfig
