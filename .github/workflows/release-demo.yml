@@ -84,6 +84,12 @@ jobs:
           GORELEASER_CURRENT_TAG: v${{ inputs.version }}
 
       - name: Publish the latest marker + install script
+        # GCS defaults these to public,max-age=3600. Both are pointers the installer
+        # reads on every run, so an hour of edge caching delays a release and, worse,
+        # delays pulling a bad version back.
         run: |
-          printf '%s' "${{ inputs.version }}" | gcloud storage cp - "gs://${DEMO_BUCKET}/doppler-agent/latest"
-          gcloud storage cp scripts/install-demo.sh "gs://${DEMO_BUCKET}/install.sh"
+          printf '%s' "${{ inputs.version }}" \
+            | gcloud storage cp - "gs://${DEMO_BUCKET}/doppler-agent/latest" \
+                --cache-control="no-cache, max-age=0"
+          gcloud storage cp scripts/install-demo.sh "gs://${DEMO_BUCKET}/install.sh" \
+            --cache-control="no-cache, max-age=0"
