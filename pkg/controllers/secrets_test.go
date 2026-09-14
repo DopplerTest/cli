@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -96,6 +97,70 @@ func TestMountSecrets(t *testing.T) {
 	content, readErr := os.ReadFile(path)
 	assert.NoError(t, readErr)
 	assert.Equal(t, string(secrets), string(content))
+}
+
+func TestConcurrentMountCleanupWaitsForUnlink(t *testing.T) {
+	if !utils.SupportsNamedPipes {
+		t.Skip("Named pipes not supported on this platform")
+	}
+	path := filepath.Join(t.TempDir(), "slow-unlink.fifo")
+	if err := utils.CreateNamedPipe(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var started atomic.Bool
+	var removals atomic.Int32
+	removing := make(chan struct{})
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	cleanup := makeFIFOCleanup(path, &started, func(path string) error {
+		if removals.Add(1) == 1 {
+			close(removing)
+		}
+		<-release
+		return os.Remove(path)
+	})
+	firstDone := make(chan struct{})
+	go func() { cleanup(); close(firstDone) }()
+	select {
+	case <-removing:
+	case <-time.After(time.Second):
+		t.Fatal("first cleanup did not begin removal")
+	}
+	if !started.Load() {
+		t.Fatal("writer must observe shutdown before removal begins")
+	}
+	secondStarted := make(chan struct{})
+	secondDone := make(chan struct{})
+	go func() { close(secondStarted); cleanup(); close(secondDone) }()
+	<-secondStarted
+	select {
+	case <-secondDone:
+		t.Fatal("concurrent cleanup returned before unlink finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("fixture should remain until unlink is released: %v", err)
+	}
+	close(release)
+	for _, done := range []chan struct{}{firstDone, secondDone} {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("cleanup did not return after unlink")
+		}
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("FIFO remains after cleanup returned: %v", err)
+	}
+	if got := removals.Load(); got != 1 {
+		t.Fatalf("cleanup attempted %d removals, want one", got)
+	}
 }
 
 func TestMountSecretsBrokenPipe(t *testing.T) {
