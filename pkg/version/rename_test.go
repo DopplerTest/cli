@@ -10,8 +10,8 @@ func TestIsRenamed(t *testing.T) {
 	if IsRenamed() {
 		t.Error("the official doppler build must not report as renamed")
 	}
-	ProgramName = "doppler-agent"
+	ProgramName = "doppler-beta"
 	if !IsRenamed() {
-		t.Error("a rebranded build (doppler-agent) must report as renamed")
+		t.Error("a rebranded build (doppler-beta) must report as renamed")
 	}
 }

@@ -9,7 +9,7 @@ import (
 )
 
 // The on-disk config location must derive from the injectable branding vars, so a
-// renamed build (e.g. doppler-agent) reads/writes ~/.doppler-agent and can't touch a
+// renamed build (e.g. doppler-beta) reads/writes ~/.doppler-beta and can't touch a
 // production doppler install's credentials.
 func TestConfigPathsFollowBranding(t *testing.T) {
 	if configFileName != version.ConfigFileName {

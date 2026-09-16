@@ -1,6 +1,6 @@
 name: release-demo
 
-# Build the `doppler-agent` preview (this CLI fork, which bundles the agent-proxy) and
+# Build the `doppler-beta` preview (this CLI fork, which bundles the agent-proxy) and
 # publish it to GCS for pilot customers. Manual trigger only; entirely separate from the
 # production `release` workflow.
 #
@@ -89,7 +89,7 @@ jobs:
         # delays pulling a bad version back.
         run: |
           printf '%s' "${{ inputs.version }}" \
-            | gcloud storage cp - "gs://${DEMO_BUCKET}/doppler-agent/latest" \
+            | gcloud storage cp - "gs://${DEMO_BUCKET}/doppler-beta/latest" \
                 --cache-control="no-cache, max-age=0"
           gcloud storage cp scripts/install-demo.sh "gs://${DEMO_BUCKET}/install.sh" \
             --cache-control="no-cache, max-age=0"

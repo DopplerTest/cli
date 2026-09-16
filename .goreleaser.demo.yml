@@ -1,5 +1,5 @@
 version: 2
-project_name: doppler-agent
+project_name: doppler-beta
 
 # Demo/preview distribution of the CLI fork (which bundles the agent-proxy) for a handful
 # of pilot customers. Kept SEPARATE from .goreleaser.yml (the production release) on
@@ -20,8 +20,8 @@ before:
     - go mod download
 
 builds:
-  - id: doppler-agent
-    binary: doppler-agent
+  - id: doppler-beta
+    binary: doppler-beta
     env:
       - CGO_ENABLED=0
     # The big 4: covers every Mac and Linux dev box / devcontainer a pilot customer runs.
@@ -37,12 +37,12 @@ builds:
       - -s -w
       - -X github.com/DopplerHQ/cli/pkg/version.ProgramVersion=v{{.Version}}
       # Build-time identity — the rename lives entirely here, not in the code:
-      - -X github.com/DopplerHQ/cli/pkg/version.ProgramName=doppler-agent
-      - -X github.com/DopplerHQ/cli/pkg/version.ConfigDirName=.doppler-agent
-      - -X github.com/DopplerHQ/cli/pkg/version.ConfigFileName=.doppler-agent.yaml
+      - -X github.com/DopplerHQ/cli/pkg/version.ProgramName=doppler-beta
+      - -X github.com/DopplerHQ/cli/pkg/version.ConfigDirName=.doppler-beta
+      - -X github.com/DopplerHQ/cli/pkg/version.ConfigFileName=.doppler-beta.yaml
 
 archives:
-  - id: doppler-agent
+  - id: doppler-beta
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -73,4 +73,4 @@ changelog:
 blobs:
   - provider: gs
     bucket: doppler-proxy-alpha
-    directory: "doppler-agent/{{ .Version }}"
+    directory: "doppler-beta/{{ .Version }}"

@@ -30,9 +30,9 @@ var ProgramVersion = "dev"
 // distribution — e.g. the agent-proxy demo build — can flip its name and config location
 // without forking the code:
 //
-//	-ldflags "-X github.com/DopplerHQ/cli/pkg/version.ProgramName=doppler-agent \
-//	          -X github.com/DopplerHQ/cli/pkg/version.ConfigDirName=.doppler-agent \
-//	          -X github.com/DopplerHQ/cli/pkg/version.ConfigFileName=.doppler-agent.yaml"
+//	-ldflags "-X github.com/DopplerHQ/cli/pkg/version.ProgramName=doppler-beta \
+//	          -X github.com/DopplerHQ/cli/pkg/version.ConfigDirName=.doppler-beta \
+//	          -X github.com/DopplerHQ/cli/pkg/version.ConfigFileName=.doppler-beta.yaml"
 //
 // The point is a rebranded build never collides with a customer's production `doppler`:
 // a distinct name on PATH, and a separate config dir so it can't read or clobber their
