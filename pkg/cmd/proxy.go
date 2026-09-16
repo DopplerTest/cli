@@ -69,6 +69,93 @@ func proxyConfigPathFor(cmd *cobra.Command) string {
 	return filepath.Join(proxyScopeDir(scope), proxyConfigFileName)
 }
 
+// proxySetupCmd is the guided path: pick the Doppler project and config for this
+// directory, scaffold the proxy config beside it, and choose the startup report.
+var proxySetupCmd = &cobra.Command{
+	Use:   "setup",
+	Short: "Pick a Doppler project and config for this directory and scaffold the proxy config",
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		setup(cmd, args)
+
+		proxyConfigPath, _ := cmd.Flags().GetString("proxy-config")
+		if proxyConfigPath == "" {
+			proxyConfigPath = proxyConfigPathFor(cmd)
+		}
+		if err := os.MkdirAll(filepath.Dir(proxyConfigPath), 0o700); err != nil {
+			utils.HandleError(err, "unable to create the proxy config directory")
+		}
+		_, created, err := proxy.LoadOrScaffold(proxyConfigPath)
+		if err != nil {
+			utils.HandleError(err, "unable to load the proxy config")
+		}
+
+		if !utils.GetBoolFlag(cmd, "no-interactive") && !utils.GetBoolFlag(cmd, "no-prompt") {
+			modes := []string{proxy.MissingBindingsWarn, proxy.MissingBindingsFail, proxy.MissingBindingsIgnore}
+			chosen := utils.SelectPrompt("Report secrets with no binding at startup:", modes, proxy.MissingBindingsWarn)
+			if err := proxy.SetMissingBindings(proxyConfigPath, chosen); err != nil {
+				utils.HandleError(err, "unable to set missing_bindings")
+			}
+		}
+
+		if created {
+			utils.Log(fmt.Sprintf("Created proxy config: %s", proxyConfigPath))
+		} else {
+			utils.Log(fmt.Sprintf("Proxy config: %s", proxyConfigPath))
+		}
+		utils.Log("")
+		utils.Log("Next: set a host for each secret in that file, then `doppler-beta proxy start`")
+	},
+}
+
+// proxyBindingsCmd adds a commented binding stub for every secret missing from the
+// config, and removes a stub for one that is gone. It is the on-demand form of
+// binding_sync, for a config that has sync turned off.
+var proxyBindingsCmd = &cobra.Command{
+	Use:   "bindings",
+	Short: "Sync the bindings section with the secrets in your Doppler config",
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		localConfig := configuration.LocalConfig(cmd)
+		tokenIsConfigScoped := strings.HasPrefix(localConfig.Token.Value, "dp.st.")
+		if !tokenIsConfigScoped && (localConfig.EnclaveProject.Value == "" || localConfig.EnclaveConfig.Value == "") {
+			utils.HandleError(errors.New("no project/config selected. Run `doppler-beta proxy setup`, pass --project and --config, or use a scoped service token"))
+		}
+
+		proxyConfigPath, _ := cmd.Flags().GetString("proxy-config")
+		if proxyConfigPath == "" {
+			proxyConfigPath = proxyConfigPathFor(cmd)
+		}
+		if _, err := os.Stat(proxyConfigPath); err != nil {
+			utils.HandleError(fmt.Errorf("proxy config not found (%s). Run `doppler-beta proxy setup` first", proxyConfigPath))
+		}
+
+		names, err := proxy.NewDopplerSource(localConfig).List(context.Background())
+		if err != nil {
+			utils.HandleError(err, "unable to list secrets")
+		}
+		added, err := proxy.MergeBindingStubs(proxyConfigPath, names)
+		if err != nil {
+			utils.HandleError(err, "unable to add binding stubs")
+		}
+		removed, err := proxy.PruneBindingStubs(proxyConfigPath, names)
+		if err != nil {
+			utils.HandleError(err, "unable to remove stale binding stubs")
+		}
+		if len(added) == 0 && len(removed) == 0 {
+			utils.Log(fmt.Sprintf("Already in step with your Doppler config: %s", proxyConfigPath))
+			return
+		}
+		if len(added) > 0 {
+			utils.Log(fmt.Sprintf("Added: %s", strings.Join(added, ", ")))
+		}
+		if len(removed) > 0 {
+			utils.Log(fmt.Sprintf("Removed: %s", strings.Join(removed, ", ")))
+		}
+		utils.Log("Set a host for each, then restart the proxy to apply.")
+	},
+}
+
 var proxyCmd = &cobra.Command{
 	Use:   "proxy",
 	Short: "Run a credential-injecting proxy for AI agents (experimental)",
@@ -134,6 +221,56 @@ var proxyStartCmd = &cobra.Command{
 		proxyConfig, created, err := proxy.LoadOrScaffold(proxyConfigPath)
 		if err != nil {
 			utils.HandleError(err, "unable to load the proxy config")
+		}
+
+		// Apply the per-Doppler-config overrides before anything reads the config. A
+		// service token implies its config without naming it locally, so fall back to
+		// the DOPPLER_CONFIG secret, which carries the name.
+		configName := localConfig.EnclaveConfig.Value
+		if configName == "" {
+			if v, fErr := source.Fetch(context.Background(), agentproxy.SecretRef{Name: "DOPPLER_CONFIG"}); fErr == nil {
+				configName = v
+			}
+		}
+		if effective, applied := proxyConfig.ResolveForConfig(configName); applied {
+			utils.Log(fmt.Sprintf("Applied config_overrides for %q", configName))
+			proxyConfig = effective
+		}
+
+		mode, modeErr := proxyConfig.MissingBindingsMode()
+		if modeErr != nil {
+			utils.HandleError(modeErr, "invalid proxy config")
+		}
+		if proxyConfig.SyncBindings() || mode != proxy.MissingBindingsIgnore {
+			names, listErr := source.List(context.Background())
+			if listErr != nil {
+				utils.HandleError(listErr, "unable to list secrets")
+			}
+			if proxyConfig.SyncBindings() {
+				addedStubs, aErr := proxy.MergeBindingStubs(proxyConfigPath, names)
+				if aErr != nil {
+					utils.HandleError(aErr, "unable to add binding stubs")
+				}
+				removedStubs, pErr := proxy.PruneBindingStubs(proxyConfigPath, names)
+				if pErr != nil {
+					utils.HandleError(pErr, "unable to remove stale binding stubs")
+				}
+				if len(addedStubs) > 0 {
+					utils.Log(fmt.Sprintf("Added binding stubs: %s", strings.Join(addedStubs, ", ")))
+				}
+				if len(removedStubs) > 0 {
+					utils.Log(fmt.Sprintf("Removed stale binding stubs: %s", strings.Join(removedStubs, ", ")))
+				}
+			}
+			// A commented stub leaves the secret refused everywhere, so report on the
+			// active bindings rather than on what the file mentions.
+			if missing := proxyConfig.SecretsWithoutBinding(names); len(missing) > 0 && mode != proxy.MissingBindingsIgnore {
+				msg := fmt.Sprintf("%d secret(s) have no binding and will be refused at every host: %s", len(missing), strings.Join(missing, ", "))
+				if mode == proxy.MissingBindingsFail {
+					utils.HandleError(errors.New(msg + "\nSet a host for each in " + proxyConfigPath + ", or set missing_bindings to warn"))
+				}
+				utils.Log("Warning: " + msg)
+			}
 		}
 		if created {
 			utils.Log(fmt.Sprintf("Created starter proxy config: %s", proxyConfigPath))
@@ -254,6 +391,22 @@ func init() {
 	if err := proxyStartCmd.RegisterFlagCompletionFunc("config", configNamesValidArgs); err != nil {
 		utils.HandleError(err)
 	}
+	proxySetupCmd.Flags().String("proxy-config", "", "path to the proxy YAML config (default <data-dir>/<scope>/config.yaml)")
+	proxySetupCmd.Flags().StringP("project", "p", "", "project (e.g. backend)")
+	proxySetupCmd.Flags().StringP("config", "c", "", "config (e.g. dev)")
+	proxySetupCmd.Flags().Bool("no-interactive", false, "do not prompt for information")
+	proxySetupCmd.Flags().Bool("no-save-token", false, "do not save the token to the config when passed via flag or environment variable")
+	proxySetupCmd.Flags().Bool("no-prompt", false, "do not prompt for information")
+	if err := proxySetupCmd.Flags().MarkHidden("no-prompt"); err != nil {
+		utils.HandleError(err)
+	}
+
+	proxyBindingsCmd.Flags().String("proxy-config", "", "path to the proxy YAML config (default <data-dir>/<scope>/config.yaml)")
+	proxyBindingsCmd.Flags().StringP("project", "p", "", "project (e.g. backend)")
+	proxyBindingsCmd.Flags().StringP("config", "c", "", "config (e.g. dev)")
+
+	proxyCmd.AddCommand(proxySetupCmd)
+	proxyCmd.AddCommand(proxyBindingsCmd)
 	proxyCmd.AddCommand(proxyStartCmd)
 	rootCmd.AddCommand(proxyCmd)
 }
