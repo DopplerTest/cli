@@ -36,6 +36,39 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// proxyDataDir is where the proxy keeps its CA, agent env and audit log. It sits under
+// the CLI's own config dir, so a rebranded build keeps everything it owns in one place
+// and a --config-dir override moves the proxy state with it.
+func proxyDataDir() string {
+	return filepath.Join(configuration.UserConfigDir, "proxy")
+}
+
+// proxyConfigFileName is the user-editable proxy config inside the scope directory.
+const proxyConfigFileName = "config.yaml"
+
+// proxyScopeDir holds the proxy config for one scope. The CLI already resolves project
+// and config per directory, so the bindings governing those secrets are scoped the same
+// way rather than shared by every project on the machine.
+func proxyScopeDir(scope string) string {
+	clean := filepath.Clean(scope)
+	if clean == "." || clean == string(filepath.Separator) {
+		return proxyDataDir()
+	}
+	return filepath.Join(proxyDataDir(), strings.TrimPrefix(clean, string(filepath.Separator)))
+}
+
+// proxyConfigPathFor resolves the config path for the directory being worked in. It
+// deliberately uses --scope rather than the scope the token resolved from: a token
+// passed on the command line reports scope "/", so keying off that would give every
+// project on the machine one shared set of bindings.
+func proxyConfigPathFor(cmd *cobra.Command) string {
+	scope, err := utils.ParsePath(cmd.Flag("scope").Value.String())
+	if err != nil {
+		scope = "/"
+	}
+	return filepath.Join(proxyScopeDir(scope), proxyConfigFileName)
+}
+
 var proxyCmd = &cobra.Command{
 	Use:   "proxy",
 	Short: "Run a credential-injecting proxy for AI agents (experimental)",
@@ -72,7 +105,7 @@ var proxyStartCmd = &cobra.Command{
 		// Resolve where the proxy keeps its data (CA) and writes its log. Create it
 		// up front — on a fresh machine it doesn't exist yet, and the log file and
 		// scaffolded config are written into it before the engine's own MkdirAll.
-		dataDir := agentproxy.DefaultDataDir()
+		dataDir := proxyDataDir()
 		if err := os.MkdirAll(dataDir, 0o700); err != nil {
 			utils.HandleError(err, "unable to create the proxy data directory")
 		}
@@ -92,7 +125,10 @@ var proxyStartCmd = &cobra.Command{
 		// Anthropic passthrough, on first run). The --passthrough flag appends.
 		proxyConfigPath, _ := cmd.Flags().GetString("proxy-config")
 		if proxyConfigPath == "" {
-			proxyConfigPath = filepath.Join(dataDir, "doppler-proxy.yaml")
+			proxyConfigPath = proxyConfigPathFor(cmd)
+		}
+		if err := os.MkdirAll(filepath.Dir(proxyConfigPath), 0o700); err != nil {
+			utils.HandleError(err, "unable to create the proxy config directory")
 		}
 		source := proxy.NewDopplerSource(localConfig)
 		proxyConfig, created, err := proxy.LoadOrScaffold(proxyConfigPath)
@@ -204,7 +240,7 @@ func init() {
 	proxyStartCmd.Flags().String("engine", "masked-hash", "proxy engine to run")
 	proxyStartCmd.Flags().String("address", "0.0.0.0:14322", "address the proxy listens on; serves host + sandbox (set 127.0.0.1 for loopback-only, no sandbox). Overrides listen_address in the proxy config")
 	proxyStartCmd.Flags().String("log-file", "", "write proxy logs to this file (default <data-dir>/proxy.log)")
-	proxyStartCmd.Flags().String("proxy-config", "", "path to the proxy YAML config (default <data-dir>/doppler-proxy.yaml, scaffolded on first run)")
+	proxyStartCmd.Flags().String("proxy-config", "", "path to the proxy YAML config (default <data-dir>/<scope>/config.yaml, scaffolded on first run)")
 	proxyStartCmd.Flags().StringSlice("passthrough", nil, "extra hostnames to blind-tunnel, appended to the config's passthrough list")
 	proxyStartCmd.Flags().String("upstream-proxy", "", "chain the proxy's own outbound connections through another HTTP proxy (e.g. http://127.0.0.1:3128 in a devcontainer)")
 	proxyStartCmd.Flags().Bool("allow-private-egress", false, "let the proxy connect to loopback and private-network addresses (local development against a local upstream only)")
