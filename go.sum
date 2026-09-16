@@ -4,6 +4,8 @@ github.com/DopplerHQ/gocui v0.1.0 h1:koC9KoJsJCLrhmU7kd3APEzyeteU4h+3+rxogvjtLHk
 github.com/DopplerHQ/gocui v0.1.0/go.mod h1:sh6LfDRF5KYZbKXdyTgZ62eVhx1dIVTTKxsTzD9Qmg4=
 github.com/DopplerTest/agent-proxy v0.1.5 h1:nkIJptU3uxUWfgZIK0Cqj2HSlX6iumZhGMgvfmTXbKo=
 github.com/DopplerTest/agent-proxy v0.1.5/go.mod h1:/4mBC4sVO32mUZWNi2KDwjymrJybOV4LHsQSK6g8Cfw=
+github.com/DopplerTest/agent-proxy v0.1.6 h1:MxeBzvX/yRVTFfCcDJbSw3SZVscpblAYPApd9Q2zUC8=
+github.com/DopplerTest/agent-proxy v0.1.6/go.mod h1:/4mBC4sVO32mUZWNi2KDwjymrJybOV4LHsQSK6g8Cfw=
 github.com/Netflix/go-expect v0.0.0-20220104043353-73e0943537d2 h1:+vx7roKuyA63nhn5WAunQHLTznkw5W8b1Xc0dNjp83s=
 github.com/Netflix/go-expect v0.0.0-20220104043353-73e0943537d2/go.mod h1:HBCaDeC1lPdgDeDbhX8XFpy1jqjK0IBG8W5K+xYqA0w=
 github.com/asaskevich/govalidator v0.0.0-20200907205600-7a23bdc65eef/go.mod h1:WaHUgvxTVq04UNunO+XhnAqY/wQc+bxr74GqbsZ/Jqw=
