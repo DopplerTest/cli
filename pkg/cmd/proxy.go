@@ -277,7 +277,6 @@ var proxyStartCmd = &cobra.Command{
 		} else {
 			utils.Log(fmt.Sprintf("Proxy config: %s", proxyConfigPath))
 		}
-		utils.Log("  (edit it to set passthrough hosts, then restart)")
 
 		// Address precedence: --address flag (if explicitly set) > config
 		// listen_address > the flag's built-in default. The scaffolded default is
