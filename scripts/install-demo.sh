@@ -1,20 +1,20 @@
 #!/bin/sh
-# install-demo.sh — one-line installer for the `doppler-agent` preview build (the CLI
+# install-demo.sh — one-line installer for the `doppler-beta` preview build (the CLI
 # fork that bundles the agent-proxy), served from GCS. Deliberately minimal compared to
 # the production scripts/install.sh: no package managers, no GPG — just fetch the archive
-# for this OS/arch, verify its sha256, and drop `doppler-agent` on PATH.
+# for this OS/arch, verify its sha256, and drop `doppler-beta` on PATH.
 #
 #   curl -fsSL https://storage.googleapis.com/doppler-proxy-alpha/install.sh | sh
 #
-# It installs `doppler-agent` (never `doppler`), so it can't collide with a production
-# Doppler CLI, and the binary keeps its state in ~/.doppler-agent.
+# It installs `doppler-beta` (never `doppler`), so it can't collide with a production
+# Doppler CLI, and the binary keeps its state in ~/.doppler-beta.
 set -eu
 
-BUCKET="${DOPPLER_AGENT_BUCKET:-doppler-proxy-alpha}"
+BUCKET="${DOPPLER_BETA_BUCKET:-doppler-proxy-alpha}"
 # Base URL the artifacts are served from. Override to point at a mirror, a signed-URL
 # host, or a local server for testing; defaults to the public GCS bucket.
-BASE="${DOPPLER_AGENT_BASE_URL:-https://storage.googleapis.com/${BUCKET}/doppler-agent}"
-INSTALL_DIR="${DOPPLER_AGENT_INSTALL_DIR:-/usr/local/bin}"
+BASE="${DOPPLER_BETA_BASE_URL:-https://storage.googleapis.com/${BUCKET}/doppler-beta}"
+INSTALL_DIR="${DOPPLER_BETA_INSTALL_DIR:-/usr/local/bin}"
 
 log() { printf '%s\n' "$*" >&2; }
 fail() { log "ERROR: $*"; exit 1; }
@@ -24,7 +24,7 @@ command -v tar >/dev/null 2>&1 || fail "tar is required"
 
 # Enforce TLS for real (https) downloads. The non-https branch is a TESTING HOOK ONLY
 # (a local server or CI): it drops TLS, and because the checksum is fetched from the same
-# base it can't detect a hostile mirror — never point DOPPLER_AGENT_BASE_URL at an
+# base it can't detect a hostile mirror — never point DOPPLER_BETA_BASE_URL at an
 # untrusted non-https host.
 case "$BASE" in
   https://*) DL="curl -fsSL --proto =https --tlsv1.2" ;;
@@ -48,11 +48,11 @@ esac
 # --- version: an explicit override, else the `latest` marker the release workflow writes ---
 # Ask for the marker uncached. An edge that already holds an old copy would keep
 # installing the previous version, including one we published a fix to replace.
-version="${DOPPLER_AGENT_VERSION:-}"
+version="${DOPPLER_BETA_VERSION:-}"
 [ -n "$version" ] || version="$($DL -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "${BASE}/latest")" || fail "could not read the latest version from ${BASE}/latest"
 version="${version#v}" # goreleaser paths/names use the version without a leading 'v'
 
-archive="doppler-agent_${version}_${os}_${arch}.tar.gz"
+archive="doppler-beta_${version}_${os}_${arch}.tar.gz"
 url="${BASE}/${version}/${archive}"
 
 tmp="$(mktemp -d)"
@@ -69,7 +69,7 @@ got="$( (command -v sha256sum >/dev/null 2>&1 && sha256sum "${tmp}/${archive}" |
 [ "$want" = "$got" ] || fail "checksum mismatch for ${archive} (want ${want}, got ${got})"
 log "Checksum verified."
 
-tar -xzf "${tmp}/${archive}" -C "$tmp" doppler-agent || fail "could not extract doppler-agent from the archive"
+tar -xzf "${tmp}/${archive}" -C "$tmp" doppler-beta || fail "could not extract doppler-beta from the archive"
 
 # --- install, falling back to a user-writable dir if the default needs root ---
 if [ ! -w "$INSTALL_DIR" ] && [ "$(id -u)" -ne 0 ]; then
@@ -77,7 +77,7 @@ if [ ! -w "$INSTALL_DIR" ] && [ "$(id -u)" -ne 0 ]; then
   mkdir -p "$INSTALL_DIR"
   log "No write access to /usr/local/bin; installing to ${INSTALL_DIR} (make sure it's on your PATH)."
 fi
-install -m 0755 "${tmp}/doppler-agent" "${INSTALL_DIR}/doppler-agent" || fail "could not install to ${INSTALL_DIR}"
+install -m 0755 "${tmp}/doppler-beta" "${INSTALL_DIR}/doppler-beta" || fail "could not install to ${INSTALL_DIR}"
 
-log "Installed doppler-agent ${version} to ${INSTALL_DIR}/doppler-agent"
-log "Run: doppler-agent proxy start"
+log "Installed doppler-beta ${version} to ${INSTALL_DIR}/doppler-beta"
+log "Run: doppler-beta proxy start"

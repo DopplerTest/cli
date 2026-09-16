@@ -26,45 +26,110 @@ import (
 	agentproxy "github.com/DopplerTest/agent-proxy"
 )
 
-// On first run the scaffolded config pre-seeds the bindings section with the
-// operator's own secret names (ENG-9770) — a commented stub per secret — so they
-// edit real entries. The stubs stay commented, so a fresh scaffold injects nothing
-// until a host is filled in.
-func TestScaffoldSeedsBindingStubsFromSecretNames(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "doppler-proxy.yaml")
-	cfg, created, err := LoadOrScaffold(path, func() []string { return []string{"DATABASE_URL", "GITHUB_TOKEN"} })
+// The scaffold ships commented examples and no operator secret names: it is written
+// once, so seeding names here would freeze the list at whatever existed on first run.
+// `proxy bindings` fills them in on demand instead.
+func TestScaffoldShipsCommentedExamples(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg, created, err := LoadOrScaffold(path)
 	if err != nil || !created {
 		t.Fatalf("scaffold: created=%v err=%v", created, err)
 	}
 	data, _ := os.ReadFile(path)
-	for _, name := range []string{"DATABASE_URL", "GITHUB_TOKEN"} {
-		if !strings.Contains(string(data), "#   "+name+":") {
-			t.Errorf("scaffolded config missing a binding stub for %q\n%s", name, data)
+	for _, want := range []string{"#   EXAMPLE_TOKEN:", "binding_sync: true"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("scaffolded config missing %q\n%s", want, data)
 		}
 	}
-	// The stubs are commented, so nothing is actually bound yet.
 	if len(cfg.Bindings) != 0 {
-		t.Errorf("scaffolded stubs must be commented (inactive), got bindings %v", cfg.Bindings)
+		t.Errorf("scaffolded examples must be commented (inactive), got bindings %v", cfg.Bindings)
 	}
 }
 
-// With no secret names available, scaffolding falls back to the generic provider
-// example rather than an empty bindings section.
-func TestScaffoldFallsBackToExampleWithoutNames(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "doppler-proxy.yaml")
-	if _, _, err := LoadOrScaffold(path, nil); err != nil {
+// Re-running the merge is a no-op, and a name already present is skipped whether its
+// entry is commented or live.
+func TestMergeBindingStubs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, _, err := LoadOrScaffold(path); err != nil {
+		t.Fatal(err)
+	}
+	// The scaffolded bindings section is empty, so every name is new. The example in
+	// the header comment sits outside the section and is not treated as a binding.
+	added, err := MergeBindingStubs(path, []string{"TEST_PROXY", "DATABASE_URL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(added, []string{"TEST_PROXY", "DATABASE_URL"}) {
+		t.Fatalf("added = %v, want [TEST_PROXY DATABASE_URL]", added)
+	}
+	// The stubs are commented, so nothing is bound yet.
+	cfg, _, err := LoadOrScaffold(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Bindings) != 0 {
+		t.Fatalf("merged stubs must be inactive, got %v", cfg.Bindings)
+	}
+	// Anchor on structure, not on comment wording: the stub must sit directly under the
+	// bindings heading or another line of the block, never after the blank line that
+	// separates the section from the next key's comment.
+	data, _ := os.ReadFile(path)
+	lines := strings.Split(string(data), "\n")
+	stubAt := -1
+	for i, l := range lines {
+		if strings.HasPrefix(l, "  # TEST_PROXY:") {
+			stubAt = i
+		}
+	}
+	if stubAt <= 0 {
+		t.Fatalf("stub not found\n%s", data)
+	}
+	prev := lines[stubAt-1]
+	if prev != "bindings:" && !strings.HasPrefix(prev, "  ") {
+		t.Fatalf("stub landed outside the bindings block, preceded by %q\n%s", prev, data)
+	}
+
+	// Idempotent.
+	again, err := MergeBindingStubs(path, []string{"TEST_PROXY", "DATABASE_URL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("second merge should add nothing, added %v", again)
+	}
+}
+
+// A live (uncommented) binding counts as present, so the merge leaves it alone.
+func TestMergeBindingStubsSkipsLiveEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, _, err := LoadOrScaffold(path); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	if !strings.Contains(string(data), "#   GITHUB_TOKEN:") {
-		t.Errorf("fallback scaffold should carry the GITHUB_TOKEN example\n%s", data)
+	live := strings.Replace(string(data), "bindings:", "bindings:\n  TEST_PROXY:\n    - host: api.example.com", 1)
+	if err := os.WriteFile(path, []byte(live), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	added, err := MergeBindingStubs(path, []string{"TEST_PROXY"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 0 {
+		t.Fatalf("a live binding must be skipped, added %v", added)
+	}
+	cfg, _, err := LoadOrScaffold(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Bindings["TEST_PROXY"]) != 1 {
+		t.Fatalf("the live binding was disturbed: %v", cfg.Bindings)
 	}
 }
 
 func TestLoadOrScaffold(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "doppler-proxy.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 
-	cfg, created, err := LoadOrScaffold(path, nil)
+	cfg, created, err := LoadOrScaffold(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +147,7 @@ func TestLoadOrScaffold(t *testing.T) {
 	}
 
 	// A second load reads the existing file — not scaffolded again.
-	cfg2, created2, err := LoadOrScaffold(path, nil)
+	cfg2, created2, err := LoadOrScaffold(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +164,7 @@ func TestLoadOrScaffold(t *testing.T) {
 // telemetry (statsig.anthropic.com) must not be blind-tunneled: they work fine
 // intercepted, and a Sentry DSN is a world-writable exfil endpoint.
 func TestScaffoldedPassthroughDropsTelemetryHoles(t *testing.T) {
-	cfg, err := parseProxyConfig([]byte(buildStarterConfig(nil)))
+	cfg, err := parseProxyConfig([]byte(starterConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,12 +183,12 @@ func TestScaffoldedPassthroughDropsTelemetryHoles(t *testing.T) {
 }
 
 func TestLoadOrScaffoldRewritesEmptyFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "doppler-proxy.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	// Pre-create an empty (blank) file — the bug case.
 	if err := os.WriteFile(path, []byte("   \n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, created, err := LoadOrScaffold(path, nil)
+	cfg, created, err := LoadOrScaffold(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +356,225 @@ func TestAllowProtocolUpgrades(t *testing.T) {
 
 // The scaffold has to document the knob, commented out at its safe default.
 func TestStarterConfigDocumentsProtocolUpgrades(t *testing.T) {
-	if !strings.Contains(starterConfigTail, "# protocol_upgrades: refuse") {
+	if !strings.Contains(starterConfig, "\nprotocol_upgrades: refuse") {
 		t.Fatal("scaffolded config does not document protocol_upgrades")
+	}
+}
+
+// Every default is written as a live line, so the file states the behavior rather than
+// leaving the operator to infer it from a commented example.
+func TestStarterConfigStatesDefaultsExplicitly(t *testing.T) {
+	cfg, err := parseProxyConfig([]byte(starterConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Unbound != "deny" {
+		t.Errorf("unbound = %q, want deny", cfg.Unbound)
+	}
+	if cfg.ProtocolUpgrades != "refuse" {
+		t.Errorf("protocol_upgrades = %q, want refuse", cfg.ProtocolUpgrades)
+	}
+	if cfg.MissingBindings != "warn" {
+		t.Errorf("missing_bindings = %q, want warn", cfg.MissingBindings)
+	}
+	if cfg.ListenAddress != "0.0.0.0:14322" {
+		t.Errorf("listen_address = %q", cfg.ListenAddress)
+	}
+}
+
+// An unset missing_bindings defaults to warn, and a bad value is rejected at startup.
+func TestMissingBindingsMode(t *testing.T) {
+	for in, want := range map[string]string{"": "warn", "ignore": "ignore", "warn": "warn", "fail": "fail"} {
+		got, err := (&ProxyConfig{MissingBindings: in}).MissingBindingsMode()
+		if err != nil || got != want {
+			t.Errorf("MissingBindingsMode(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := (&ProxyConfig{MissingBindings: "nope"}).MissingBindingsMode(); err == nil {
+		t.Error("an unknown missing_bindings value must be rejected")
+	}
+}
+
+// The check reports secrets that are actually refused. A commented stub does not count,
+// and DOPPLER_* metadata plus pass_by_value secrets are never expected to have one.
+func TestSecretsWithoutBinding(t *testing.T) {
+	cfg := &ProxyConfig{
+		Bindings:    map[string][]agentproxy.Rule{"GITHUB_TOKEN": {{Host: "api.github.com"}}},
+		PassByValue: []string{"MODEL_PROVIDER_TOKEN"},
+	}
+	got := cfg.SecretsWithoutBinding([]string{
+		"DOPPLER_CONFIG", "DOPPLER_PROJECT", "GITHUB_TOKEN", "MODEL_PROVIDER_TOKEN", "TEST_PROXY", "DATABASE_URL",
+	})
+	if !slices.Equal(got, []string{"TEST_PROXY", "DATABASE_URL"}) {
+		t.Fatalf("SecretsWithoutBinding = %v, want [TEST_PROXY DATABASE_URL]", got)
+	}
+}
+
+// A live bindings section added below the commented template is still a binding. The
+// merge scans every section, so a name bound there is not re-added as a stub.
+func TestMergeBindingStubsSeesLaterBindingsSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, _, err := LoadOrScaffold(path); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	// Drop the commented GITHUB_TOKEN example, then bind it for real further down.
+	trimmed := string(data) + "\nbindings:\n  LATER_TOKEN:\n    - host: api.example.com\n"
+	if err := os.WriteFile(path, []byte(trimmed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	added, err := MergeBindingStubs(path, []string{"LATER_TOKEN"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 0 {
+		t.Fatalf("a binding in a later section must be seen as present, added %v", added)
+	}
+}
+
+// An override REPLACES a secret's rule list rather than merging with the base, so the
+// effective allowlist is never a union the reader has to assemble.
+func TestConfigOverrideReplacesRatherThanMerges(t *testing.T) {
+	cfg, err := parseProxyConfig([]byte(`
+bindings:
+  GITHUB_TOKEN:
+    - host: api.github.com
+  STRIPE_SECRET_KEY:
+    - host: api.stripe.com
+missing_bindings: warn
+unbound: deny
+config_overrides:
+  prd:
+    bindings:
+      GITHUB_TOKEN:
+        - host: api.github.com
+          paths: ["/repos/acme/**"]
+    missing_bindings: fail
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base, applied := cfg.ResolveForConfig("dev")
+	if applied {
+		t.Error("no override is defined for dev")
+	}
+	if len(base.Bindings["GITHUB_TOKEN"]) != 1 || len(base.Bindings["GITHUB_TOKEN"][0].Paths) != 0 {
+		t.Errorf("dev should see the base rule unscoped, got %+v", base.Bindings["GITHUB_TOKEN"])
+	}
+
+	prd, applied := cfg.ResolveForConfig("prd")
+	if !applied {
+		t.Fatal("the prd override should apply")
+	}
+	// Replace, not merge: exactly one rule, the scoped one.
+	got := prd.Bindings["GITHUB_TOKEN"]
+	if len(got) != 1 {
+		t.Fatalf("override must replace the rule list, got %d rules: %+v", len(got), got)
+	}
+	if len(got[0].Paths) != 1 || got[0].Paths[0] != "/repos/acme/**" {
+		t.Errorf("prd rule = %+v, want the scoped path", got[0])
+	}
+	// A secret the override omits is inherited.
+	if len(prd.Bindings["STRIPE_SECRET_KEY"]) != 1 {
+		t.Error("an unnamed secret must inherit its base binding")
+	}
+	// A scalar the override sets wins; one it omits is inherited.
+	if prd.MissingBindings != "fail" {
+		t.Errorf("missing_bindings = %q, want fail", prd.MissingBindings)
+	}
+	if prd.Unbound != "deny" {
+		t.Errorf("unbound = %q, want the inherited deny", prd.Unbound)
+	}
+	// Resolving must not mutate the base.
+	if len(cfg.Bindings["GITHUB_TOKEN"][0].Paths) != 0 {
+		t.Error("resolving an override mutated the base config")
+	}
+}
+
+// Naming a secret with an empty rule list binds it nowhere, without disturbing the
+// other secrets the override leaves alone.
+func TestConfigOverrideEmptyRuleListBindsNothing(t *testing.T) {
+	cfg, err := parseProxyConfig([]byte(`
+bindings:
+  GITHUB_TOKEN:
+    - host: api.github.com
+  STRIPE_SECRET_KEY:
+    - host: api.stripe.com
+config_overrides:
+  locked:
+    bindings:
+      GITHUB_TOKEN: []
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, _ := cfg.ResolveForConfig("locked")
+	if len(locked.Bindings["GITHUB_TOKEN"]) != 0 {
+		t.Errorf("an empty rule list must bind nothing, got %v", locked.Bindings["GITHUB_TOKEN"])
+	}
+	if len(locked.Bindings["STRIPE_SECRET_KEY"]) != 1 {
+		t.Errorf("an untouched secret must keep its base binding, got %v", locked.Bindings["STRIPE_SECRET_KEY"])
+	}
+}
+
+// SetMissingBindings rewrites only the one line, so comments and edits elsewhere survive.
+func TestSetMissingBindingsPreservesTheRestOfTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, _, err := LoadOrScaffold(path); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	if err := SetMissingBindings(path, MissingBindingsFail); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+
+	cfg, err := parseProxyConfig(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MissingBindings != "fail" {
+		t.Errorf("missing_bindings = %q, want fail", cfg.MissingBindings)
+	}
+	// Exactly one line differs.
+	b, a := strings.Split(string(before), "\n"), strings.Split(string(after), "\n")
+	if len(b) != len(a) {
+		t.Fatalf("line count changed: %d -> %d", len(b), len(a))
+	}
+	diff := 0
+	for i := range b {
+		if b[i] != a[i] {
+			diff++
+		}
+	}
+	if diff != 1 {
+		t.Errorf("%d lines changed, want exactly 1", diff)
+	}
+}
+
+// The example lives in the header comment, above the bindings section, so binding_sync
+// never prunes it. It used to sit inside the section and vanished on the first start.
+func TestScaffoldExampleSurvivesSync(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, _, err := LoadOrScaffold(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MergeBindingStubs(path, []string{"REAL_SECRET"}); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := PruneBindingStubs(path, []string{"REAL_SECRET"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 0 {
+		t.Errorf("prune removed %v, want nothing", removed)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "EXAMPLE_TOKEN") {
+		t.Errorf("the example must survive a sync\n%s", data)
+	}
+	if !strings.Contains(string(data), "  # REAL_SECRET:") {
+		t.Errorf("the real stub should have been added\n%s", data)
 	}
 }

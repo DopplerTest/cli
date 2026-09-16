@@ -26,7 +26,6 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -56,7 +55,7 @@ var agentRunCmd = &cobra.Command{
 		dockerBin, _ := cmd.Flags().GetString("docker")
 
 		// Resolve the proxy's artifacts using the shared path helpers.
-		dataDir := agentproxy.DefaultDataDir()
+		dataDir := proxyDataDir()
 		caPath := agentproxy.CACertPath(dataDir)
 		envPath := agentproxy.AgentEnvPath(dataDir)
 
@@ -129,7 +128,7 @@ var agentDoctorCmd = &cobra.Command{
 			if v := firstEnv("NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE", "SSL_CERT_FILE"); v != "" {
 				caPath = v
 			} else {
-				caPath = agentproxy.CACertPath(agentproxy.DefaultDataDir())
+				caPath = agentproxy.CACertPath(proxyDataDir())
 			}
 		}
 
@@ -231,13 +230,10 @@ func credentialSources(devHome, dataDir string) []string {
 	return out
 }
 
-// dataDirUnder is agentproxy.DefaultDataDir for another user's home, following
-// the platform default. --proxy-data-dir covers an XDG_CONFIG_HOME override.
+// dataDirUnder is proxyDataDir for another user's home. --proxy-data-dir covers a
+// --config-dir override.
 func dataDirUnder(home string) string {
-	if runtime.GOOS == "darwin" {
-		return filepath.Join(home, "Library", "Application Support", "agent-proxy")
-	}
-	return filepath.Join(home, ".config", "agent-proxy")
+	return filepath.Join(home, version.ConfigDirName, "proxy")
 }
 
 // agentEnforceCmd installs the sandbox contract IN PLACE — inside a box the user
@@ -287,14 +283,14 @@ var agentEnforceCmd = &cobra.Command{
 		// CA path: flag, else default on-disk location.
 		caPath, _ := cmd.Flags().GetString("ca")
 		if caPath == "" {
-			caPath = agentproxy.CACertPath(agentproxy.DefaultDataDir())
+			caPath = agentproxy.CACertPath(proxyDataDir())
 		}
 
 		// Build the agent env from the proxy's agent.env, repointing the proxy and
 		// CA vars at this boundary and stripping anything the agent must not hold.
 		envPath, _ := cmd.Flags().GetString("agent-env")
 		if envPath == "" {
-			envPath = agentproxy.AgentEnvPath(agentproxy.DefaultDataDir())
+			envPath = agentproxy.AgentEnvPath(proxyDataDir())
 		}
 		rawEnv, err := os.ReadFile(envPath)
 		if err != nil {
@@ -439,7 +435,7 @@ func init() {
 	agentDoctorCmd.Flags().String("proxy", "", "proxy URL the agent should use (default $HTTPS_PROXY or http://127.0.0.1:14322)")
 	agentDoctorCmd.Flags().String("ca", "", "proxy CA cert path (default $NODE_EXTRA_CA_CERTS or <data-dir>/ca.crt)")
 	agentDoctorCmd.Flags().String("test-url", "https://example.com", "URL fetched through the proxy to test end-to-end CA trust")
-	agentDoctorCmd.Flags().String("proxy-data-dir", "", "proxy data directory holding the CA key (default: the developer's platform config dir)")
+	agentDoctorCmd.Flags().String("proxy-data-dir", "", "proxy data directory holding the CA key (default: <config-dir>/proxy)")
 	agentCmd.AddCommand(agentDoctorCmd)
 
 	agentEnforceCmd.Flags().String("strategy", "shared-box", "egress lock strategy: shared-box (compose onto an existing firewall) or owned-container (flush)")
@@ -450,7 +446,7 @@ func init() {
 	agentEnforceCmd.Flags().String("agent-env", "", "path to the proxy's agent.env (default <data-dir>/agent.env)")
 	agentEnforceCmd.Flags().Bool("strict-dns", false, "treat an open external DNS resolver as a preflight failure")
 	agentEnforceCmd.Flags().String("test-url", "https://example.com", "URL fetched through the proxy to test end-to-end CA trust")
-	agentEnforceCmd.Flags().String("proxy-data-dir", "", "proxy data directory holding the CA key (default: the developer's platform config dir)")
+	agentEnforceCmd.Flags().String("proxy-data-dir", "", "proxy data directory holding the CA key (default: <config-dir>/proxy)")
 	agentCmd.AddCommand(agentEnforceCmd)
 
 	rootCmd.AddCommand(agentCmd)
