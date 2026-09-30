@@ -30,6 +30,7 @@ import (
 	"syscall"
 
 	"github.com/DopplerHQ/cli/pkg/configuration"
+	"github.com/DopplerHQ/cli/pkg/models"
 	"github.com/DopplerHQ/cli/pkg/proxy"
 	"github.com/DopplerHQ/cli/pkg/utils"
 	agentproxy "github.com/DopplerTest/agent-proxy"
@@ -170,8 +171,23 @@ var proxyStartCmd = &cobra.Command{
 		engineName, _ := cmd.Flags().GetString("engine")
 		address, _ := cmd.Flags().GetString("address")
 
-		// Resolve the CLI's auth + scope the same way `doppler run` does.
-		localConfig := configuration.LocalConfig(cmd)
+		// Resolve the CLI's auth + scope the same way `doppler run` does, unless an
+		// agent is named: then the proxy runs on that agent's own service token,
+		// project and config, with its state and config beside the profile.
+		var agent *proxy.AgentProfile
+		if agentName, _ := cmd.Flags().GetString("agent"); agentName != "" {
+			p, err := proxy.LoadAgent(configuration.UserConfigDir, agentName)
+			if err != nil {
+				utils.HandleError(err, "unable to load the agent")
+			}
+			agent = p
+		}
+		var localConfig models.ScopedOptions
+		if agent != nil {
+			localConfig = agentScopedConfig(cmd, agent)
+		} else {
+			localConfig = configuration.LocalConfig(cmd)
+		}
 		utils.RequireValue("token", localConfig.Token.Value)
 
 		// A config-scoped service token (dp.st.) carries its own project/config.
@@ -193,6 +209,9 @@ var proxyStartCmd = &cobra.Command{
 		// up front — on a fresh machine it doesn't exist yet, and the log file and
 		// scaffolded config are written into it before the engine's own MkdirAll.
 		dataDir := proxyDataDir()
+		if agent != nil {
+			dataDir = proxy.AgentDataDir(proxy.AgentDir(configuration.UserConfigDir, agent.Name))
+		}
 		if err := os.MkdirAll(dataDir, 0o700); err != nil {
 			utils.HandleError(err, "unable to create the proxy data directory")
 		}
@@ -211,6 +230,9 @@ var proxyStartCmd = &cobra.Command{
 		// Load the user-editable proxy config (scaffolding it, pre-filled with the
 		// Anthropic passthrough, on first run). The --passthrough flag appends.
 		proxyConfigPath, _ := cmd.Flags().GetString("proxy-config")
+		if proxyConfigPath == "" && agent != nil {
+			proxyConfigPath = proxy.AgentConfigPath(proxy.AgentDir(configuration.UserConfigDir, agent.Name))
+		}
 		if proxyConfigPath == "" {
 			proxyConfigPath = proxyConfigPathFor(cmd)
 		}
@@ -296,9 +318,9 @@ var proxyStartCmd = &cobra.Command{
 		// broadly-bound or shared-network listener isn't an open forward proxy. It's
 		// embedded in the agent env's proxy URL, so configured clients send it
 		// automatically.
-		proxyToken, err := mintProxyToken()
+		proxyToken, err := loadOrMintProxyToken(dataDir)
 		if err != nil {
-			utils.HandleError(err, "unable to generate the per-run proxy token")
+			utils.HandleError(err, "unable to generate the proxy token")
 		}
 
 		opts, err := engineOptions(proxyConfig, proxyStartInputs{
@@ -374,6 +396,7 @@ func engineOptions(cfg *proxy.ProxyConfig, in proxyStartInputs) (proxy.Options, 
 
 func init() {
 	proxyStartCmd.Flags().String("engine", "masked-hash", "proxy engine to run")
+	proxyStartCmd.Flags().String("agent", "", "run the proxy for a named agent: its service token, project, config, proxy config and state")
 	proxyStartCmd.Flags().String("address", "0.0.0.0:14322", "address the proxy listens on; serves host + sandbox (set 127.0.0.1 for loopback-only, no sandbox). Overrides listen_address in the proxy config")
 	proxyStartCmd.Flags().String("log-file", "", "write proxy logs to this file (default <data-dir>/proxy.log)")
 	proxyStartCmd.Flags().String("proxy-config", "", "path to the proxy YAML config (default <data-dir>/<scope>/config.yaml, scaffolded on first run)")
@@ -410,7 +433,44 @@ func init() {
 	rootCmd.AddCommand(proxyCmd)
 }
 
-// mintProxyToken returns a fresh, high-entropy per-run credential (256 bits, hex).
+// loadOrMintProxyToken returns the credential clients must present to this proxy.
+// It lives beside the CA in the data dir and is reused across restarts, so a sandbox
+// that is already running keeps working when the proxy is restarted to pick up a
+// config change. The data dir is 0700 and the file 0600.
+func loadOrMintProxyToken(dataDir string) (string, error) {
+	path := filepath.Join(dataDir, "proxy-token")
+	if data, err := os.ReadFile(path); err == nil {
+		// Require 64 hex chars (what mintProxyToken writes), not just any 64 bytes, so a
+		// truncated or corrupted file is re-minted here rather than failing auth later.
+		if tok := strings.TrimSpace(string(data)); isProxyToken(tok) {
+			return tok, nil
+		}
+	}
+	tok, err := mintProxyToken()
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return tok, nil
+}
+
+// isProxyToken reports whether s is a credential mintProxyToken could have produced:
+// exactly 64 lowercase hex characters (256 bits).
+func isProxyToken(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// mintProxyToken returns a fresh, high-entropy credential (256 bits, hex).
 func mintProxyToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
