@@ -137,7 +137,7 @@ var agentCreateCmd = &cobra.Command{
 		hostname, _ := os.Hostname()
 		tokenName := fmt.Sprintf("agent-proxy %s (%s)", name, hostname)
 		verifyTLS := utils.GetBool(localConfig.VerifyTLS.Value, true)
-		minted, herr := http.CreateConfigServiceToken(localConfig.APIHost.Value, verifyTLS, localConfig.Token.Value, project, config, tokenName, time.Time{}, "read")
+		minted, herr := http.CreateConfigServiceToken(localConfig.APIHost.Value, verifyTLS, localConfig.Token.Value, project, config, tokenName, agentTokenExpiry(cmd), "read")
 		if !herr.IsNil() {
 			utils.HandleError(herr.Unwrap(), "unable to mint a service token for the agent")
 		}
@@ -146,14 +146,15 @@ var agentCreateCmd = &cobra.Command{
 		}
 
 		p := &proxy.AgentProfile{
-			Name:      name,
-			Project:   project,
-			Config:    config,
-			Command:   strings.Fields(command),
-			Mounts:    mounts,
-			TokenSlug: minted.Slug,
-			TokenName: minted.Name,
-			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			Name:           name,
+			Project:        project,
+			Config:         config,
+			Command:        strings.Fields(command),
+			Mounts:         mounts,
+			TokenSlug:      minted.Slug,
+			TokenName:      minted.Name,
+			TokenExpiresAt: minted.ExpiresAt,
+			CreatedAt:      time.Now().UTC().Format(time.RFC3339),
 		}
 		if err := proxy.SaveAgent(configuration.UserConfigDir, p); err != nil {
 			utils.HandleError(err, "unable to save the agent")
@@ -261,16 +262,108 @@ var agentDeleteCmd = &cobra.Command{
 	},
 }
 
+// agentTokenExpiry turns the --max-age flag into the absolute expiry the API wants:
+// now + the duration, or the zero time (no expiry) when the flag is unset or 0. This
+// mirrors `doppler configs tokens create`.
+func agentTokenExpiry(cmd *cobra.Command) time.Time {
+	maxAge := utils.GetDurationFlagIfChanged(cmd, "max-age", 0)
+	if maxAge == 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(maxAge)
+}
+
+// rotateAgentToken mints a fresh token, writes it and updates the profile, then
+// revokes the old one. The new token is written and saved before the old one is
+// revoked, so a failure along the way never leaves the agent with no usable token.
+func rotateAgentToken(configDir string, p *proxy.AgentProfile, mint func() (models.ConfigServiceToken, error), revoke func(slug string) error) error {
+	minted, err := mint()
+	if err != nil {
+		return err
+	}
+	if minted.Token == "" {
+		return errors.New("the API returned no token value")
+	}
+	oldSlug := p.TokenSlug
+	dir := proxy.AgentDir(configDir, p.Name)
+	if err := proxy.WriteAgentToken(dir, minted.Token); err != nil {
+		return err
+	}
+	p.TokenSlug = minted.Slug
+	p.TokenName = minted.Name
+	p.TokenExpiresAt = minted.ExpiresAt
+	if err := proxy.SaveAgent(configDir, p); err != nil {
+		return err
+	}
+	if oldSlug != "" && oldSlug != minted.Slug {
+		if err := revoke(oldSlug); err != nil {
+			return fmt.Errorf("minted a new token but could not revoke the old one (%s), revoke it by hand: %w", oldSlug, err)
+		}
+	}
+	return nil
+}
+
+var agentRotateCmd = &cobra.Command{
+	Use:   "rotate <name>",
+	Short: "Mint a fresh service token for an agent and revoke the old one",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		p, err := proxy.LoadAgent(configuration.UserConfigDir, args[0])
+		if err != nil {
+			utils.HandleError(err, "unable to load the agent")
+		}
+		localConfig := configuration.LocalConfig(cmd)
+		utils.RequireValue("token", localConfig.Token.Value)
+		verifyTLS := utils.GetBool(localConfig.VerifyTLS.Value, true)
+		hostname, _ := os.Hostname()
+		tokenName := fmt.Sprintf("agent-proxy %s (%s)", p.Name, hostname)
+		expireAt := agentTokenExpiry(cmd)
+
+		mint := func() (models.ConfigServiceToken, error) {
+			m, herr := http.CreateConfigServiceToken(localConfig.APIHost.Value, verifyTLS, localConfig.Token.Value, p.Project, p.Config, tokenName, expireAt, "read")
+			return m, httpErr(herr)
+		}
+		revoke := func(slug string) error {
+			return httpErr(http.DeleteConfigServiceToken(localConfig.APIHost.Value, verifyTLS, localConfig.Token.Value, p.Project, p.Config, slug, ""))
+		}
+		if err := rotateAgentToken(configuration.UserConfigDir, p, mint, revoke); err != nil {
+			utils.HandleError(err, "unable to rotate the agent's token")
+		}
+
+		if utils.OutputJSON {
+			printJSON(viewOf(*p))
+			return
+		}
+		utils.Log(fmt.Sprintf("Rotated the service token for agent %s (new token %s)", p.Name, p.TokenSlug))
+		utils.Log(fmt.Sprintf("Restart its proxy to pick up the new token: `%s proxy start --agent %s`", cmd.Root().Name(), p.Name))
+	},
+}
+
+// httpErr adapts an http.Error to a plain error, preserving the message even when
+// the wrapped error is nil.
+func httpErr(herr http.Error) error {
+	if herr.IsNil() {
+		return nil
+	}
+	if e := herr.Unwrap(); e != nil {
+		return e
+	}
+	return errors.New(herr.Message)
+}
+
 func init() {
 	agentCreateCmd.Flags().StringP("project", "p", "", "Doppler project the agent reads")
 	agentCreateCmd.Flags().StringP("config", "c", "", "Doppler config the agent reads")
 	agentCreateCmd.Flags().String("command", "claude", "command the sandbox runs")
 	agentCreateCmd.Flags().StringArray("mount", nil, "host directory mounted at /workspace/<basename>; repeat for more, append :ro for read-only")
+	agentCreateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
+	agentRotateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentDeleteCmd.Flags().Bool("keep-token", false, "leave the service token in place")
 	agentDeleteCmd.Flags().String("docker", "docker", "container CLI used to remove the agent's home volume (docker, podman, ...)")
 	agentCmd.AddCommand(agentCreateCmd)
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentShowCmd)
+	agentCmd.AddCommand(agentRotateCmd)
 	agentCmd.AddCommand(agentDeleteCmd)
 }
 

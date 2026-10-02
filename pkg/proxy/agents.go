@@ -40,7 +40,10 @@ type AgentProfile struct {
 	Mounts    []string `yaml:"mounts" json:"mounts"`
 	TokenSlug string   `yaml:"token_slug,omitempty" json:"token_slug"`
 	TokenName string   `yaml:"token_name,omitempty" json:"token_name"`
-	CreatedAt string   `yaml:"created_at" json:"created_at"`
+	// TokenExpiresAt is the RFC3339 expiry the API reports for the service token,
+	// or "" when the token was minted without one.
+	TokenExpiresAt string `yaml:"token_expires_at,omitempty" json:"token_expires_at"`
+	CreatedAt      string `yaml:"created_at" json:"created_at"`
 }
 
 const (
