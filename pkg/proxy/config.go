@@ -510,6 +510,35 @@ func SetMissingBindings(path, mode string) error {
 	return fmt.Errorf("no missing_bindings line found in %s", path)
 }
 
+// SetListenAddress rewrites the listen_address line in place.
+func SetListenAddress(path, address string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "listen_address:") {
+			lines[i] = "listen_address: " + address
+			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+		}
+	}
+	return fmt.Errorf("no listen_address line found in %s", path)
+}
+
+// ReadListenAddress returns the config's listen_address, or "" when unset.
+func ReadListenAddress(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	cfg, err := parseProxyConfig(data)
+	if err != nil {
+		return ""
+	}
+	return cfg.ListenAddress
+}
+
 // PruneBindingStubs removes the commented stub for every secret in the bindings section
 // that is absent from names. It only ever removes a commented stub: a binding the
 // operator has uncommented is a destination they chose, so a secret that disappears

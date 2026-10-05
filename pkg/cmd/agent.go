@@ -30,6 +30,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/DopplerHQ/cli/pkg/configuration"
+	"github.com/DopplerHQ/cli/pkg/proxy"
 	"github.com/DopplerHQ/cli/pkg/utils"
 	"github.com/DopplerHQ/cli/pkg/version"
 	agentproxy "github.com/DopplerTest/agent-proxy"
@@ -46,34 +48,87 @@ var agentCmd = &cobra.Command{
 }
 
 var agentRunCmd = &cobra.Command{
-	Use:   "run -- <command>",
-	Short: "Run a command inside a locked-down sandbox whose only egress is the proxy",
-	Args:  cobra.MinimumNArgs(1),
+	Use:   "run [<agent>] [-- <command>]",
+	Short: "Run an agent, or a command, inside a locked-down sandbox whose only egress is the proxy",
+	Long: `Run a named agent inside the sandbox using its command and mounts, against the
+proxy started for it with ` + "`proxy start --agent <name>`" + `. A command after -- replaces
+the agent's own. Without an agent name, run the command against the default proxy
+with the current directory mounted.`,
+	Args: cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		proxyPort, _ := cmd.Flags().GetInt("proxy-port")
 		rebuild, _ := cmd.Flags().GetBool("rebuild")
 		dockerBin, _ := cmd.Flags().GetString("docker")
+		mountFlags, _ := cmd.Flags().GetStringArray("mount")
 
-		// Resolve the proxy's artifacts using the shared path helpers.
+		// A first argument naming an existing agent selects profile mode; the rest,
+		// if any, replaces the profile's command.
+		var agent *proxy.AgentProfile
+		command := args
+		if len(args) > 0 && cmd.ArgsLenAtDash() != 0 {
+			if p, err := proxy.LoadAgent(configuration.UserConfigDir, args[0]); err == nil {
+				agent = p
+				command = args[1:]
+			}
+		}
 		dataDir := proxyDataDir()
+		var mounts []string
+		if agent != nil {
+			dataDir = proxy.AgentDataDir(proxy.AgentDir(configuration.UserConfigDir, agent.Name))
+			mounts = append(mounts, agent.Mounts...)
+			if len(command) == 0 {
+				command = agent.Command
+			}
+			if !cmd.Flags().Changed("proxy-port") {
+				proxyPort = proxy.AgentPort(configuration.UserConfigDir, agent.Name)
+			}
+		}
+		if len(command) == 0 {
+			utils.HandleError(errors.New("nothing to run: name an agent, or pass a command after --"))
+		}
+		for _, m := range mountFlags {
+			host, ro, err := proxy.ParseMount(m)
+			if err != nil {
+				utils.HandleError(err, "invalid --mount")
+			}
+			if ro {
+				host += ":ro"
+			}
+			mounts = append(mounts, host)
+		}
+		if agent == nil && len(mountFlags) == 0 {
+			if cwd, err := os.Getwd(); err == nil {
+				mounts = []string{cwd}
+			}
+		}
+
 		caPath := agentproxy.CACertPath(dataDir)
 		envPath := agentproxy.AgentEnvPath(dataDir)
-
+		startHint := fmt.Sprintf("%s proxy start --address 0.0.0.0:%d", cmd.Root().Name(), proxyPort)
+		if agent != nil {
+			startHint = fmt.Sprintf("%s proxy start --agent %s", cmd.Root().Name(), agent.Name)
+		}
 		for _, p := range []string{caPath, envPath} {
 			if _, err := os.Stat(p); err != nil {
-				utils.HandleError(fmt.Errorf(
-					"proxy artifacts not found (%s). Start the proxy first, bound to an address the sandbox can reach:\n  doppler proxy start --address 0.0.0.0:%d",
-					p, proxyPort))
+				utils.HandleError(fmt.Errorf("proxy artifacts not found (%s). Start the proxy first, bound to an address the sandbox can reach:\n  %s", p, startHint))
 			}
+		}
+
+		fresh, _ := cmd.Flags().GetBool("fresh")
+		homeVolume := ""
+		if agent != nil && !fresh {
+			homeVolume = proxy.AgentHomeVolume(agent.Name)
 		}
 
 		cfg := sandbox.Config{
 			ProxyPort:    proxyPort,
 			CACertPath:   caPath,
 			AgentEnvPath: envPath,
-			Command:      args,
+			Command:      command,
 			DockerBin:    dockerBin,
 			Interactive:  true,
+			Mounts:       mounts,
+			HomeVolume:   homeVolume,
 		}
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -428,6 +483,8 @@ func init() {
 	agentRunCmd.Flags().Int("proxy-port", 14322, "port the credential proxy is listening on")
 	agentRunCmd.Flags().Bool("rebuild", false, "rebuild the sandbox image before running")
 	agentRunCmd.Flags().String("docker", "docker", "container CLI to use (docker, podman, ...)")
+	agentRunCmd.Flags().Bool("fresh", false, "start from an empty home instead of the agent's persisted one (login state, settings and history)")
+	agentRunCmd.Flags().StringArray("mount", nil, "host directory mounted at /workspace/<basename>; repeat for more, append :ro for read-only (default: the agent's mounts, or the current directory)")
 	agentCmd.AddCommand(agentRunCmd)
 
 	agentDoctorCmd.Flags().Bool("enforced", false, "assert the full contract: an egress-containment failure is fatal")
