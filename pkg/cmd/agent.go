@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/DopplerHQ/cli/pkg/configuration"
 	"github.com/DopplerHQ/cli/pkg/proxy"
@@ -123,9 +124,13 @@ with the current directory mounted.`,
 		// The agent's local environment (its provider credential) is exported into this
 		// process and only named to docker, so the values are inherited rather than written
 		// into the command line. It never touches Doppler or the proxy.
+		agentDir := ""
+		if agent != nil {
+			agentDir = proxy.AgentDir(configuration.UserConfigDir, agent.Name)
+		}
 		var envNames []string
 		if agent != nil {
-			localEnv, err := proxy.ReadAgentEnv(proxy.AgentDir(configuration.UserConfigDir, agent.Name))
+			localEnv, err := proxy.ReadAgentEnv(agentDir)
 			if err != nil {
 				utils.HandleError(err, "unable to read the agent's local environment")
 			}
@@ -143,7 +148,8 @@ with the current directory mounted.`,
 			Env:          envNames,
 		}
 
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		// SIGHUP too: closing the terminal window must still let the run record close.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		defer stop()
 
 		if rebuild {
@@ -158,8 +164,32 @@ with the current directory mounted.`,
 			}
 		}
 
-		if err := sandbox.Run(ctx, cfg); err != nil {
-			utils.HandleError(err, "sandbox exited with an error")
+		// Record the run beside the profile so the desktop app can tell runs apart, no
+		// matter which terminal launched this one. A failed write must not stop the run.
+		var record *proxy.LastRun
+		if agent != nil {
+			record = &proxy.LastRun{StartedAt: time.Now().UTC(), Command: command}
+			if err := proxy.WriteLastRun(agentDir, *record); err != nil {
+				utils.PrintWarning(fmt.Sprintf("Unable to record the start of this run: %v", err))
+			}
+		}
+		runErr := sandbox.Run(ctx, cfg)
+		if record != nil {
+			ended := time.Now().UTC()
+			code := proxy.ExitCodeOf(runErr)
+			record.EndedAt, record.ExitCode = &ended, &code
+			if err := proxy.WriteLastRun(agentDir, *record); err != nil {
+				utils.PrintWarning(fmt.Sprintf("Unable to record the end of this run: %v", err))
+			}
+		}
+		if runErr != nil {
+			// SIGTERM (143) and Ctrl-C (130) are how `agent stop` and the user end a run on
+			// purpose, so report those as a stop rather than a failure.
+			if code := proxy.ExitCodeOf(runErr); proxy.IsStopExitCode(code) {
+				utils.Log("Sandbox stopped.")
+				os.Exit(code)
+			}
+			utils.HandleError(runErr, "sandbox exited with an error")
 		}
 	},
 }
