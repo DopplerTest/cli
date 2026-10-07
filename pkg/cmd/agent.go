@@ -135,12 +135,23 @@ with the current directory mounted.`,
 				utils.HandleError(err, "unable to read the agent's local environment")
 			}
 			envNames = proxy.ExportAgentEnv(localEnv)
+			// The sandbox notes ride in the same way: exported here, named to docker, so
+			// the text never appears in the command line.
+			cfg, _, err := proxy.LoadOrScaffold(proxy.AgentConfigPath(agentDir))
+			if err != nil {
+				utils.HandleError(err, "unable to read the agent's proxy config")
+			}
+			scope, _ := cfg.ResolveForConfig(agent.Config)
+			if err := os.Setenv(proxy.SandboxNotesEnv, proxy.RenderSandboxNotes(scope)); err != nil {
+				utils.HandleError(err, "unable to prepare the sandbox notes")
+			}
+			envNames = append(envNames, proxy.SandboxNotesEnv)
 		}
 		cfg := sandbox.Config{
 			ProxyPort:    proxyPort,
 			CACertPath:   caPath,
 			AgentEnvPath: envPath,
-			Command:      proxy.WrapFirstRun(command, envNames),
+			Command:      proxy.WrapRun(command, envNames),
 			DockerBin:    dockerBin,
 			Interactive:  true,
 			Mounts:       mounts,
