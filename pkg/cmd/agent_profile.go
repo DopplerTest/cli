@@ -176,7 +176,7 @@ var agentCreateCmd = &cobra.Command{
 			utils.HandleError(err, "unable to store the agent's token")
 		}
 		port := proxy.NextAgentPort(configuration.UserConfigDir)
-		if _, _, err := proxy.LoadOrScaffold(proxy.AgentConfigPath(dir)); err != nil {
+		if _, _, err := proxy.LoadOrScaffoldWith(proxy.AgentConfigPath(dir), proxy.ProviderHosts(p.Command)); err != nil {
 			utils.HandleError(err, "unable to scaffold the agent's proxy config")
 		}
 		if err := proxy.SetListenAddress(proxy.AgentConfigPath(dir), fmt.Sprintf("0.0.0.0:%d", port)); err != nil {

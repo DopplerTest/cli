@@ -217,17 +217,13 @@ func (c *ProxyConfig) MethodConfigs() map[string]agentproxy.MethodConfig {
 // scaffolded proxy injects nothing until the operator names a destination. The secret
 // names are deliberately left out here: `proxy bindings` fills them in on demand, so
 // the list stays current instead of freezing at whatever existed on the first run.
-const starterConfig = `# Doppler agent credential proxy.
+const starterTemplate = `# Doppler agent credential proxy.
 
 # 0.0.0.0 also serves the ` + "`agent run`" + ` sandbox. 127.0.0.1 is loopback only.
 listen_address: 0.0.0.0:14322
 
-# Hosts tunnelled without interception.
-passthrough:
-  - api.anthropic.com
-  - console.anthropic.com
-  - claude.ai
-  - claude.com
+# Hosts tunnelled without interception: the agent's own provider.
+{{passthrough}}
 
 # The hosts each secret may be sent to.
 #
@@ -281,9 +277,38 @@ protocol_upgrades: refuse
 #     missing_bindings: fail
 `
 
+// defaultPassthrough is what a plain ` + "`proxy start`" + ` scaffolds. An agent's config is
+// scaffolded for the agent it runs instead (see ProviderHosts).
+var defaultPassthrough = ProviderHosts([]string{"claude"})
+
+// starterConfig is the default-rendered starter, kept for callers and tests that
+// want the plain proxy's config.
+var starterConfig = renderStarterConfig(defaultPassthrough)
+
+func renderStarterConfig(passthrough []string) string {
+	var b strings.Builder
+	if len(passthrough) == 0 {
+		b.WriteString("passthrough: []")
+	} else {
+		b.WriteString("passthrough:")
+		for _, h := range passthrough {
+			b.WriteString("\n  - " + h)
+		}
+	}
+	return strings.Replace(starterTemplate, "{{passthrough}}", b.String(), 1)
+}
+
 // LoadOrScaffold loads the proxy config from path. If the file does not exist (or is
 // blank) it writes the starter config and returns it with created=true.
 func LoadOrScaffold(path string) (cfg *ProxyConfig, created bool, err error) {
+	return LoadOrScaffoldWith(path, defaultPassthrough)
+}
+
+// LoadOrScaffoldWith is LoadOrScaffold with the passthrough hosts the starter config
+// should carry, so an agent's config starts with its own provider's hosts and nothing
+// else. Nil means an empty list.
+func LoadOrScaffoldWith(path string, passthrough []string) (cfg *ProxyConfig, created bool, err error) {
+	starter := renderStarterConfig(passthrough)
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, false, err
@@ -292,10 +317,10 @@ func LoadOrScaffold(path string) (cfg *ProxyConfig, created bool, err error) {
 	// file (e.g. from an interrupted write) still gets populated on startup instead
 	// of silently loading as an empty config.
 	if errors.Is(err, os.ErrNotExist) || len(bytes.TrimSpace(data)) == 0 {
-		if err := os.WriteFile(path, []byte(starterConfig), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(starter), 0o644); err != nil {
 			return nil, false, err
 		}
-		cfg, err = parseProxyConfig([]byte(starterConfig))
+		cfg, err = parseProxyConfig([]byte(starter))
 		return cfg, true, err
 	}
 	cfg, err = parseProxyConfig(data)
