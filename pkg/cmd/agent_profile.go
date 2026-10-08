@@ -53,11 +53,17 @@ type agentView struct {
 	CAPath        string `json:"ca_path"`
 	HasToken      bool   `json:"has_token"`
 	ListenAddress string `json:"listen_address"`
+	// EnvKeys are the names in the agent's local environment (provider credentials). Values are never exposed.
+	EnvKeys []string `json:"env_keys"`
 }
 
 func viewOf(p proxy.AgentProfile) agentView {
 	dir := proxy.AgentDir(configuration.UserConfigDir, p.Name)
 	data := proxy.AgentDataDir(dir)
+	envKeys := proxy.AgentEnvKeys(dir)
+	if envKeys == nil {
+		envKeys = []string{}
+	}
 	return agentView{
 		AgentProfile:  p,
 		Dir:           dir,
@@ -67,6 +73,7 @@ func viewOf(p proxy.AgentProfile) agentView {
 		CAPath:        agentproxy.CACertPath(data),
 		HasToken:      proxy.ReadAgentToken(dir) != "",
 		ListenAddress: proxy.ReadListenAddress(proxy.AgentConfigPath(dir)),
+		EnvKeys:       envKeys,
 	}
 }
 
