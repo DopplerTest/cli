@@ -55,6 +55,8 @@ type agentView struct {
 	ListenAddress string `json:"listen_address"`
 	// EnvKeys are the names in the agent's local environment (provider credentials). Values are never exposed.
 	EnvKeys []string `json:"env_keys"`
+	// LastRun is nil until the agent has been run at least once.
+	LastRun *proxy.LastRun `json:"last_run"`
 }
 
 func viewOf(p proxy.AgentProfile) agentView {
@@ -64,6 +66,8 @@ func viewOf(p proxy.AgentProfile) agentView {
 	if envKeys == nil {
 		envKeys = []string{}
 	}
+	// A corrupt record reads as "never run" rather than breaking the whole listing.
+	lastRun, _ := proxy.ReadLastRun(dir)
 	return agentView{
 		AgentProfile:  p,
 		Dir:           dir,
@@ -74,6 +78,7 @@ func viewOf(p proxy.AgentProfile) agentView {
 		HasToken:      proxy.ReadAgentToken(dir) != "",
 		ListenAddress: proxy.ReadListenAddress(proxy.AgentConfigPath(dir)),
 		EnvKeys:       envKeys,
+		LastRun:       lastRun,
 	}
 }
 
