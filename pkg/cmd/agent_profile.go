@@ -17,19 +17,12 @@ limitations under the License.
 package cmd
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"os/signal"
-	"path/filepath"
-	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/DopplerHQ/cli/pkg/configuration"
@@ -255,8 +248,8 @@ var agentDeleteCmd = &cobra.Command{
 		if err := os.RemoveAll(proxy.AgentDir(configuration.UserConfigDir, name)); err != nil {
 			utils.HandleError(err, "unable to remove the agent directory")
 		}
-		// The home volume can hold a Claude Code login synced in by `agent login-sync`, and
-		// its name is derived from the agent name, so a later agent of the same name would
+		// The home volume can hold the agent's own provider login, and its name is
+		// derived from the agent name, so a later agent of the same name would
 		// silently reuse it. If removal fails (a sandbox is still running, or a different
 		// container CLI), warn with the manual cleanup rather than leaving it a silent orphan.
 		dockerBin, _ := cmd.Flags().GetString("docker")
@@ -264,7 +257,7 @@ var agentDeleteCmd = &cobra.Command{
 		homeVolumeRemoved := true
 		if rmErr := sandbox.RemoveHomeVolume(context.Background(), dockerBin, volume); rmErr != nil {
 			homeVolumeRemoved = false
-			utils.PrintWarning(fmt.Sprintf("Removed the agent, but its home volume %q may remain (it can hold a synced login). Remove it with `%s volume rm %s`.", volume, dockerBin, volume))
+			utils.PrintWarning(fmt.Sprintf("Removed the agent, but its home volume %q may remain (it can hold the agent's login). Remove it with `%s volume rm %s`.", volume, dockerBin, volume))
 		}
 		if utils.OutputJSON {
 			printJSON(map[string]any{"deleted": name, "token_revoked": !keepToken && p.TokenSlug != "", "home_volume_removed": homeVolumeRemoved})
@@ -377,119 +370,4 @@ func init() {
 	agentCmd.AddCommand(agentShowCmd)
 	agentCmd.AddCommand(agentRotateCmd)
 	agentCmd.AddCommand(agentDeleteCmd)
-}
-
-// hostClaudeCredentials returns the Claude Code OAuth credential stored on this
-// machine: the macOS keychain item on darwin, ~/.claude/.credentials.json elsewhere.
-func hostClaudeCredentials() ([]byte, string, error) {
-	if runtime.GOOS == "darwin" {
-		out, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w").Output()
-		if err != nil {
-			return nil, "", errors.New("no Claude Code login in the macOS keychain. Run `claude` on this machine and log in first")
-		}
-		return bytes.TrimSpace(out), "macOS keychain", nil
-	}
-	path := filepath.Join(utils.HomeDir(), ".claude", ".credentials.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, "", fmt.Errorf("no Claude Code login at %s. Run `claude` on this machine and log in first", path)
-	}
-	return bytes.TrimSpace(data), path, nil
-}
-
-// claudeHomeTar packs the credential (and the host's settings.json when present)
-// as a tar stream rooted at the sandbox user's home.
-func claudeHomeTar(creds []byte) ([]byte, []string, error) {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	var copied []string
-	add := func(name string, data []byte, mode int64) error {
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: mode, Size: int64(len(data)), ModTime: time.Now()}); err != nil {
-			return err
-		}
-		_, err := tw.Write(data)
-		return err
-	}
-	if err := add(".claude/.credentials.json", creds, 0o600); err != nil {
-		return nil, nil, err
-	}
-	copied = append(copied, ".claude/.credentials.json")
-	if settings, err := os.ReadFile(filepath.Join(utils.HomeDir(), ".claude", "settings.json")); err == nil && json.Valid(settings) {
-		if err := add(".claude/settings.json", settings, 0o600); err != nil {
-			return nil, nil, err
-		}
-		copied = append(copied, ".claude/settings.json")
-	}
-	// ~/.claude.json carries the onboarding flag and the account the login belongs
-	// to. Without it Claude Code treats the sandbox as a first run. Host-specific
-	// entries (project history, MCP servers with host paths) stay behind.
-	if state, err := os.ReadFile(filepath.Join(utils.HomeDir(), ".claude.json")); err == nil {
-		var m map[string]any
-		if json.Unmarshal(state, &m) == nil {
-			for _, k := range []string{"projects", "mcpServers", "claudeCodeFirstTokenDate", "cachedChangelog"} {
-				delete(m, k)
-			}
-			m["hasCompletedOnboarding"] = true
-			if trimmed, err := json.Marshal(m); err == nil {
-				if err := add(".claude.json", trimmed, 0o600); err != nil {
-					return nil, nil, err
-				}
-				copied = append(copied, ".claude.json")
-			}
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return nil, nil, err
-	}
-	return buf.Bytes(), copied, nil
-}
-
-var agentLoginSyncCmd = &cobra.Command{
-	Use:   "login-sync <name>",
-	Short: "Copy this machine's Claude Code login into the agent's sandbox home, so the agent starts logged in",
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		p, err := proxy.LoadAgent(configuration.UserConfigDir, args[0])
-		if err != nil {
-			utils.HandleError(err, "unable to load the agent")
-		}
-		dockerBin, _ := cmd.Flags().GetString("docker")
-		creds, source, err := hostClaudeCredentials()
-		if err != nil {
-			utils.HandleError(err)
-		}
-		if !json.Valid(creds) {
-			utils.HandleError(errors.New("the stored Claude Code credential is not valid JSON"))
-		}
-		archive, copied, err := claudeHomeTar(creds)
-		if err != nil {
-			utils.HandleError(err, "unable to pack the credential")
-		}
-
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		cfg := sandbox.Config{DockerBin: dockerBin}
-		if err := sandbox.EnsureImage(ctx, cfg); err != nil {
-			utils.HandleError(err, "failed to prepare the sandbox image")
-		}
-		volume := proxy.AgentHomeVolume(p.Name)
-		script := "umask 077 && mkdir -p /home/agent/.claude && tar -C /home/agent -xf - && chown -R agent:agent /home/agent/.claude /home/agent/.claude.json 2>/dev/null; chown agent:agent /home/agent/.claude && chmod 700 /home/agent/.claude"
-		run := exec.CommandContext(ctx, dockerBin, "run", "--rm", "-i", "--entrypoint", "/bin/sh", "-v", volume+":/home/agent", sandbox.DefaultImage, "-c", script)
-		run.Stdin = bytes.NewReader(archive)
-		var stderr bytes.Buffer
-		run.Stderr = &stderr
-		if err := run.Run(); err != nil {
-			utils.HandleError(fmt.Errorf("%s", strings.TrimSpace(stderr.String())), "unable to write into the agent's home volume")
-		}
-		if utils.OutputJSON {
-			printJSON(map[string]any{"agent": p.Name, "source": source, "volume": volume, "copied": copied})
-			return
-		}
-		utils.Log(fmt.Sprintf("Copied your Claude Code login (%s) into %s: %s", source, volume, strings.Join(copied, ", ")))
-	},
-}
-
-func init() {
-	agentLoginSyncCmd.Flags().String("docker", "docker", "container CLI to use (docker, podman, ...)")
-	agentCmd.AddCommand(agentLoginSyncCmd)
 }
