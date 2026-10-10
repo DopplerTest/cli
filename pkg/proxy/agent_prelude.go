@@ -71,10 +71,50 @@ if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && ! grep -q '"hasCompletedOnboarding"[[:sp
 fi
 `
 
+// A resume reopens the agent's latest conversation for the working directory, which
+// each program keeps under the home volume, so it survives a sandbox restart. The
+// prelude decides inside the sandbox, where the home is mounted and the layout can be
+// checked with a file test, and only adds the program's resume flag when there is a
+// conversation to continue. Asking the program to resume with nothing on disk ends the
+// run with an error, which is what this avoids. A command that already resumes is left
+// alone.
+//
+// Claude Code keeps one folder per working directory under ~/.claude/projects, named by
+// the path with every character outside [A-Za-z0-9] turned into "-". Codex writes one
+// JSONL file per session under ~/.codex/sessions with the working directory in its
+// header. Gemini CLI keeps chats under ~/.gemini/tmp/<sha256 of the directory>/chats.
+var resumePreludes = map[string]string{
+	"claude": `if ls "$HOME/.claude/projects/$(printf '%s' "$PWD" | sed 's/[^A-Za-z0-9]/-/g')"/*.jsonl >/dev/null 2>&1; then
+  case " $* " in *" --continue "*|*" -c "*|*" --resume "*|*" -r "*) ;; *) set -- "$@" --continue ;; esac
+  doppler_resumed=1
+fi
+`,
+	"codex": `if grep -rlsF --include='*.jsonl' "\"cwd\":\"$PWD\"" "$HOME/.codex/sessions" 2>/dev/null | grep -q .; then
+  if [ "$2" != "resume" ]; then doppler_prog=$1; shift; set -- "$doppler_prog" resume --last "$@"; fi
+  doppler_resumed=1
+fi
+`,
+	"gemini": `if ls "$HOME/.gemini/tmp/$(printf '%s' "$PWD" | sha256sum | cut -d' ' -f1)/chats"/*.json >/dev/null 2>&1; then
+  case " $* " in *" --resume "*|*" -r "*) ;; *) set -- "$@" --resume ;; esac
+  doppler_resumed=1
+fi
+`,
+}
+
+// Says which way the run went, so the user watching the terminal is not left guessing
+// why the agent came up empty.
+const resumeOutcomePrelude = `if [ -n "$doppler_resumed" ]; then
+  echo "Continuing the previous conversation."
+else
+  echo "No previous conversation here, starting a new one."
+fi
+`
+
 // WrapRun returns the command to run in the sandbox: the prelude for this agent, then
-// an exec of the original command with its arguments intact. An empty command is
-// returned unchanged.
-func WrapRun(command []string, envKeys []string) []string {
+// an exec of the original command with its arguments intact. With resume set, the
+// program's latest conversation for the working directory is reopened when it has one.
+// An empty command is returned unchanged.
+func WrapRun(command []string, envKeys []string, resume bool) []string {
 	if len(command) == 0 {
 		return command
 	}
@@ -86,6 +126,10 @@ func WrapRun(command []string, envKeys []string) []string {
 	}
 	if program == "claude" && contains(envKeys, "CLAUDE_CODE_OAUTH_TOKEN") {
 		b.WriteString(claudeOnboardingPrelude)
+	}
+	if resume {
+		b.WriteString(resumePreludes[program])
+		b.WriteString(resumeOutcomePrelude)
 	}
 	b.WriteString("unset DOPPLER_SANDBOX_NOTES\nexec \"$@\"\n")
 	return append([]string{"sh", "-c", b.String(), "doppler-run"}, command...)
