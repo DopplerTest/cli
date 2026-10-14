@@ -116,6 +116,7 @@ with the current directory mounted.`,
 		}
 
 		fresh, _ := cmd.Flags().GetBool("fresh")
+		resume, _ := cmd.Flags().GetBool("resume")
 		homeVolume := ""
 		if agent != nil && !fresh {
 			homeVolume = proxy.AgentHomeVolume(agent.Name)
@@ -151,7 +152,7 @@ with the current directory mounted.`,
 			ProxyPort:    proxyPort,
 			CACertPath:   caPath,
 			AgentEnvPath: envPath,
-			Command:      proxy.WrapRun(command, envNames),
+			Command:      proxy.WrapRun(command, envNames, resume),
 			DockerBin:    dockerBin,
 			Interactive:  true,
 			Mounts:       mounts,
@@ -537,6 +538,7 @@ func init() {
 	agentRunCmd.Flags().Bool("rebuild", false, "rebuild the sandbox image before running")
 	agentRunCmd.Flags().String("docker", "docker", "container CLI to use (docker, podman, ...)")
 	agentRunCmd.Flags().Bool("fresh", false, "start from an empty home instead of the agent's persisted one (login state, settings and history)")
+	agentRunCmd.Flags().Bool("resume", false, "continue the agent's latest conversation in its working directory when it has one, otherwise start a new one")
 	agentRunCmd.Flags().StringArray("mount", nil, "host directory mounted at /workspace/<basename>; repeat for more, append :ro for read-only (default: the agent's mounts, or the current directory)")
 	agentCmd.AddCommand(agentRunCmd)
 
