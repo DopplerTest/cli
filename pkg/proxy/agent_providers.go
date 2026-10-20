@@ -16,7 +16,10 @@ limitations under the License.
 
 package proxy
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"slices"
+)
 
 // The hosts each known agent needs to reach its own provider: the API itself plus the
 // account and login endpoints its CLI talks to. These are tunnelled rather than
@@ -30,13 +33,35 @@ var providerHosts = map[string][]string{
 	"aider":  {"api.openai.com", "api.anthropic.com"},
 }
 
+// KnownAgents are the values the agent field accepts: the provider families the proxy
+// knows hosts for, plus "other" for anything else.
+var KnownAgents = []string{"claude", "codex", "gemini", "aider", "other"}
+
+// IsKnownAgent reports whether s is one of KnownAgents.
+func IsKnownAgent(s string) bool {
+	return slices.Contains(KnownAgents, s)
+}
+
 // ProviderHosts returns the passthrough hosts for the agent a command runs, by the
 // program's basename, or nil for a program the proxy does not know.
 func ProviderHosts(command []string) []string {
 	if len(command) == 0 {
 		return nil
 	}
-	hosts := providerHosts[filepath.Base(command[0])]
+	return hostsFor(filepath.Base(command[0]))
+}
+
+// ProviderHostsFor returns the passthrough hosts for an agent profile: by the agent
+// field when it is set, otherwise by the command's program, for older profiles.
+func ProviderHostsFor(agent string, command []string) []string {
+	if agent != "" {
+		return hostsFor(agent)
+	}
+	return ProviderHosts(command)
+}
+
+func hostsFor(key string) []string {
+	hosts := providerHosts[key]
 	if hosts == nil {
 		return nil
 	}
