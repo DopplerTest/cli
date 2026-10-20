@@ -33,10 +33,15 @@ import (
 // token minted for it. Its proxy config (bindings, passthrough, ...) lives beside it
 // as config.yaml, and its proxy state (CA, agent env, log) under proxy/.
 type AgentProfile struct {
-	Name      string   `yaml:"name" json:"name"`
-	Project   string   `yaml:"project" json:"project"`
-	Config    string   `yaml:"config" json:"config"`
-	Command   []string `yaml:"command" json:"command"`
+	Name    string   `yaml:"name" json:"name"`
+	Project string   `yaml:"project" json:"project"`
+	Config  string   `yaml:"config" json:"config"`
+	Command []string `yaml:"command" json:"command"`
+	// Agent is the program family the user picked when creating the agent (claude, codex,
+	// gemini, aider or other), kept apart from Command so a wrapper or alias in the command
+	// does not change which provider credential the agent is offered. Empty on agents
+	// created before the field existed; callers fall back to the command then.
+	Agent     string   `yaml:"agent,omitempty" json:"agent"`
 	Mounts    []string `yaml:"mounts" json:"mounts"`
 	TokenSlug string   `yaml:"token_slug,omitempty" json:"token_slug"`
 	TokenName string   `yaml:"token_name,omitempty" json:"token_name"`

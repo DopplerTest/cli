@@ -70,3 +70,21 @@ func TestScaffoldPassthroughFollowsTheAgent(t *testing.T) {
 		t.Fatalf("default scaffold passthrough = %v", cfg.Passthrough)
 	}
 }
+
+func TestProviderHostsForPrefersTheAgentField(t *testing.T) {
+	// A wrapper in front of the program must not change the provider: the agent field wins.
+	got := ProviderHostsFor("gemini", []string{"some-wrapper", "--", "claude"})
+	if len(got) == 0 || got[0] != "generativelanguage.googleapis.com" {
+		t.Fatalf("agent field ignored: %v", got)
+	}
+	if got := ProviderHostsFor("other", []string{"claude"}); got != nil {
+		t.Fatalf("other should have no provider hosts, got %v", got)
+	}
+	// Older profiles have no agent field and still resolve by the command's program.
+	if got := ProviderHostsFor("", []string{"/usr/local/bin/codex"}); len(got) == 0 || got[0] != "api.openai.com" {
+		t.Fatalf("fallback by command broken: %v", got)
+	}
+	if !IsKnownAgent("aider") || IsKnownAgent("cursor") {
+		t.Fatal("IsKnownAgent is wrong")
+	}
+}

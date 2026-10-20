@@ -126,6 +126,10 @@ var agentCreateCmd = &cobra.Command{
 		}
 
 		command, _ := cmd.Flags().GetString("command")
+		agentKind, _ := cmd.Flags().GetString("agent")
+		if agentKind != "" && !proxy.IsKnownAgent(agentKind) {
+			utils.HandleError(fmt.Errorf("unknown --agent %q; use one of %s", agentKind, strings.Join(proxy.KnownAgents, ", ")))
+		}
 		mountFlags, _ := cmd.Flags().GetStringArray("mount")
 		var mounts []string
 		for _, m := range mountFlags {
@@ -155,6 +159,7 @@ var agentCreateCmd = &cobra.Command{
 			Project:        project,
 			Config:         config,
 			Command:        strings.Fields(command),
+			Agent:          agentKind,
 			Mounts:         mounts,
 			TokenSlug:      minted.Slug,
 			TokenName:      minted.Name,
@@ -169,7 +174,7 @@ var agentCreateCmd = &cobra.Command{
 			utils.HandleError(err, "unable to store the agent's token")
 		}
 		port := proxy.NextAgentPort(configuration.UserConfigDir)
-		if _, _, err := proxy.LoadOrScaffoldWith(proxy.AgentConfigPath(dir), proxy.ProviderHosts(p.Command)); err != nil {
+		if _, _, err := proxy.LoadOrScaffoldWith(proxy.AgentConfigPath(dir), proxy.ProviderHostsFor(p.Agent, p.Command)); err != nil {
 			utils.HandleError(err, "unable to scaffold the agent's proxy config")
 		}
 		if err := proxy.SetListenAddress(proxy.AgentConfigPath(dir), fmt.Sprintf("0.0.0.0:%d", port)); err != nil {
@@ -360,6 +365,7 @@ func init() {
 	agentCreateCmd.Flags().StringP("project", "p", "", "Doppler project the agent reads")
 	agentCreateCmd.Flags().StringP("config", "c", "", "Doppler config the agent reads")
 	agentCreateCmd.Flags().String("command", "claude", "command the sandbox runs")
+	agentCreateCmd.Flags().String("agent", "", "the agent family the command runs (claude, codex, gemini, aider or other); decides the provider hosts and credential, defaults to the command's program")
 	agentCreateCmd.Flags().StringArray("mount", nil, "host directory mounted at /workspace/<basename>; repeat for more, append :ro for read-only")
 	agentCreateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentRotateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
