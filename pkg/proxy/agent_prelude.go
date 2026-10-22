@@ -71,6 +71,12 @@ if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && ! grep -q '"hasCompletedOnboarding"[[:sp
 fi
 `
 
+// Claude Code's fullscreen renderer, which the home volume keeps on once it is chosen and a
+// server-side flag can also turn on, takes the alternate screen and captures the mouse, so
+// the terminal can no longer select text or scroll back. The classic renderer leaves both
+// to the terminal.
+const claudeRendererPrelude = "export CLAUDE_CODE_NO_FLICKER=0\n"
+
 // A resume reopens the agent's latest conversation for the working directory, which
 // each program keeps under the home volume, so it survives a sandbox restart. The
 // prelude decides inside the sandbox, where the home is mounted and the layout can be
@@ -126,6 +132,9 @@ func WrapRun(command []string, envKeys []string, resume bool) []string {
 	}
 	if program == "claude" && contains(envKeys, "CLAUDE_CODE_OAUTH_TOKEN") {
 		b.WriteString(claudeOnboardingPrelude)
+	}
+	if program == "claude" {
+		b.WriteString(claudeRendererPrelude)
 	}
 	if resume {
 		b.WriteString(resumePreludes[program])
