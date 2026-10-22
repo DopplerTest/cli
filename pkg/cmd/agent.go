@@ -124,7 +124,8 @@ with the current directory mounted.`,
 
 		// The agent's local environment (its provider credential) is exported into this
 		// process and only named to docker, so the values are inherited rather than written
-		// into the command line. It never touches Doppler or the proxy.
+		// into the command line. It never touches Doppler or the proxy. The shared
+		// environment is laid underneath it, so the agent's own value wins on a clash.
 		agentDir := ""
 		if agent != nil {
 			agentDir = proxy.AgentDir(configuration.UserConfigDir, agent.Name)
@@ -135,7 +136,11 @@ with the current directory mounted.`,
 			if err != nil {
 				utils.HandleError(err, "unable to read the agent's local environment")
 			}
-			envNames = proxy.ExportAgentEnv(localEnv)
+			sharedEnv, err := proxy.ReadSharedEnv(configuration.UserConfigDir)
+			if err != nil {
+				utils.HandleError(err, "unable to read the shared environment")
+			}
+			envNames = proxy.ExportAgentEnv(proxy.MergeAgentEnv(localEnv, sharedEnv))
 			// The sandbox notes ride in the same way: exported here, named to docker, so
 			// the text never appears in the command line.
 			cfg, _, err := proxy.LoadOrScaffold(proxy.AgentConfigPath(agentDir))

@@ -31,12 +31,19 @@ import (
 // KEY=value lines and is never written to Doppler or handled by the proxy. `agent run`
 // exports each entry into its own process and names it to docker (`-e KEY`), so the
 // value is inherited rather than written into the command line.
+//
+// A shared environment of the same format lives at the top of the config directory.
+// Every agent inherits its entries, and an agent's own entry wins when both hold the
+// same key, so a credential can be stored once for the user rather than per agent.
 const agentLocalEnvFile = "env"
 
 var envKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
 // AgentLocalEnvPath is the file holding the agent's local environment, mode 0600.
 func AgentLocalEnvPath(dir string) string { return filepath.Join(dir, agentLocalEnvFile) }
+
+// SharedEnvPath is the file holding the environment every agent inherits, mode 0600.
+func SharedEnvPath(configDir string) string { return filepath.Join(configDir, agentLocalEnvFile) }
 
 // ValidateEnvKey rejects anything that is not a conventional environment variable name.
 func ValidateEnvKey(key string) error {
@@ -46,10 +53,62 @@ func ValidateEnvKey(key string) error {
 	return nil
 }
 
-// ReadAgentEnv returns the stored entries. A missing file is an empty environment.
+// ReadAgentEnv returns the agent's stored entries. A missing file is an empty environment.
 func ReadAgentEnv(dir string) (map[string]string, error) {
+	return readEnvFile(AgentLocalEnvPath(dir))
+}
+
+// SetAgentEnv stores one entry for the agent, replacing any existing value for the key.
+func SetAgentEnv(dir, key, value string) error {
+	return setEnvFile(AgentLocalEnvPath(dir), key, value)
+}
+
+// UnsetAgentEnv removes one of the agent's entries. A missing key is not an error.
+func UnsetAgentEnv(dir, key string) error {
+	return unsetEnvFile(AgentLocalEnvPath(dir), key)
+}
+
+// AgentEnvKeys returns the agent's stored names, sorted. Values are never listed.
+func AgentEnvKeys(dir string) []string {
+	return envFileKeys(AgentLocalEnvPath(dir))
+}
+
+// ReadSharedEnv returns the shared entries. A missing file is an empty environment.
+func ReadSharedEnv(configDir string) (map[string]string, error) {
+	return readEnvFile(SharedEnvPath(configDir))
+}
+
+// SetSharedEnv stores one shared entry, replacing any existing value for the key.
+func SetSharedEnv(configDir, key, value string) error {
+	return setEnvFile(SharedEnvPath(configDir), key, value)
+}
+
+// UnsetSharedEnv removes one shared entry. A missing key is not an error.
+func UnsetSharedEnv(configDir, key string) error {
+	return unsetEnvFile(SharedEnvPath(configDir), key)
+}
+
+// SharedEnvKeys returns the shared names, sorted. Values are never listed.
+func SharedEnvKeys(configDir string) []string {
+	return envFileKeys(SharedEnvPath(configDir))
+}
+
+// MergeAgentEnv lays the agent's own entries over the shared ones, so the agent's
+// value wins when both hold the same key. The result is what the sandbox receives.
+func MergeAgentEnv(agent, shared map[string]string) map[string]string {
+	merged := make(map[string]string, len(agent)+len(shared))
+	for key, value := range shared {
+		merged[key] = value
+	}
+	for key, value := range agent {
+		merged[key] = value
+	}
+	return merged
+}
+
+func readEnvFile(path string) (map[string]string, error) {
 	env := map[string]string{}
-	data, err := os.ReadFile(AgentLocalEnvPath(dir))
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return env, nil
 	}
@@ -68,8 +127,7 @@ func ReadAgentEnv(dir string) (map[string]string, error) {
 	return env, nil
 }
 
-// SetAgentEnv stores one entry, replacing any existing value for the key.
-func SetAgentEnv(dir, key, value string) error {
+func setEnvFile(path, key, value string) error {
 	if err := ValidateEnvKey(key); err != nil {
 		return err
 	}
@@ -79,17 +137,16 @@ func SetAgentEnv(dir, key, value string) error {
 	if strings.ContainsAny(value, "\r\n") {
 		return errors.New("the value must be a single line")
 	}
-	env, err := ReadAgentEnv(dir)
+	env, err := readEnvFile(path)
 	if err != nil {
 		return err
 	}
 	env[key] = value
-	return writeAgentEnv(dir, env)
+	return writeEnvFile(path, env)
 }
 
-// UnsetAgentEnv removes one entry. A missing key is not an error.
-func UnsetAgentEnv(dir, key string) error {
-	env, err := ReadAgentEnv(dir)
+func unsetEnvFile(path, key string) error {
+	env, err := readEnvFile(path)
 	if err != nil {
 		return err
 	}
@@ -97,12 +154,11 @@ func UnsetAgentEnv(dir, key string) error {
 		return nil
 	}
 	delete(env, key)
-	return writeAgentEnv(dir, env)
+	return writeEnvFile(path, env)
 }
 
-// AgentEnvKeys returns the stored names, sorted. Values are never listed.
-func AgentEnvKeys(dir string) []string {
-	env, err := ReadAgentEnv(dir)
+func envFileKeys(path string) []string {
+	env, err := readEnvFile(path)
 	if err != nil {
 		return nil
 	}
@@ -119,15 +175,15 @@ func ExportAgentEnv(env map[string]string) []string {
 	return sortedEnvKeys(env)
 }
 
-func writeAgentEnv(dir string, env map[string]string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+func writeEnvFile(path string, env map[string]string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	var b strings.Builder
 	for _, key := range sortedEnvKeys(env) {
 		b.WriteString(key + "=" + env[key] + "\n")
 	}
-	return os.WriteFile(AgentLocalEnvPath(dir), []byte(b.String()), 0o600)
+	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
 
 func sortedEnvKeys(env map[string]string) []string {
