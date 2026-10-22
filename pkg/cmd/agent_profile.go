@@ -48,6 +48,9 @@ type agentView struct {
 	ListenAddress string `json:"listen_address"`
 	// EnvKeys are the names in the agent's local environment (provider credentials). Values are never exposed.
 	EnvKeys []string `json:"env_keys"`
+	// SharedEnvKeys are the names in the shared environment every agent inherits. An
+	// agent's own entry wins over a shared one of the same name. Values are never exposed.
+	SharedEnvKeys []string `json:"shared_env_keys"`
 	// LastRun is nil until the agent has been run at least once.
 	LastRun *proxy.LastRun `json:"last_run"`
 }
@@ -58,6 +61,10 @@ func viewOf(p proxy.AgentProfile) agentView {
 	envKeys := proxy.AgentEnvKeys(dir)
 	if envKeys == nil {
 		envKeys = []string{}
+	}
+	sharedEnvKeys := proxy.SharedEnvKeys(configuration.UserConfigDir)
+	if sharedEnvKeys == nil {
+		sharedEnvKeys = []string{}
 	}
 	// A corrupt record reads as "never run" rather than breaking the whole listing.
 	lastRun, _ := proxy.ReadLastRun(dir)
@@ -71,6 +78,7 @@ func viewOf(p proxy.AgentProfile) agentView {
 		HasToken:      proxy.ReadAgentToken(dir) != "",
 		ListenAddress: proxy.ReadListenAddress(proxy.AgentConfigPath(dir)),
 		EnvKeys:       envKeys,
+		SharedEnvKeys: sharedEnvKeys,
 		LastRun:       lastRun,
 	}
 }
