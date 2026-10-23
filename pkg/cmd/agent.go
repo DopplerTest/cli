@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
@@ -39,6 +40,7 @@ import (
 	"github.com/DopplerTest/agent-proxy/enforce"
 	"github.com/DopplerTest/agent-proxy/sandbox"
 	"github.com/DopplerTest/agent-proxy/verify"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -46,6 +48,34 @@ var agentCmd = &cobra.Command{
 	Use:   "agent",
 	Short: "Run AI agents against the credential proxy (experimental)",
 	Args:  cobra.NoArgs,
+}
+
+// agentRunChildEnv marks the inner `agent run` that does the work under the pseudo-terminal
+// the outer one holds, so it does not wrap itself again.
+const agentRunChildEnv = "DOPPLER_AGENT_RUN_CHILD"
+
+// runUnderTerminal re-runs this command as a child on a pseudo-terminal, when the run has a
+// terminal to begin with, and copies to the clipboard here whatever the sandbox copies with
+// an OSC 52 write. Claude Code, with no clipboard tool in the sandbox, copies that way, and
+// Terminal.app ignores the sequence, so without this the text never left the container. The
+// child exits as the sandbox did and this process exits the same way; a child that could not
+// be started falls back to running the sandbox here, without the clipboard.
+func runUnderTerminal() {
+	if os.Getenv(agentRunChildEnv) != "" || !isatty.IsTerminal(os.Stdin.Fd()) || !isatty.IsTerminal(os.Stdout.Fd()) {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	child := exec.Command(exe, os.Args[1:]...)
+	child.Env = append(os.Environ(), agentRunChildEnv+"=1")
+	code, err := proxy.RunUnderTerminal(child, func(text string) { _ = utils.CopyToClipboard(text) })
+	if err != nil {
+		utils.LogDebugError(err)
+		return
+	}
+	os.Exit(code)
 }
 
 var agentRunCmd = &cobra.Command{
@@ -57,6 +87,7 @@ the agent's own. Without an agent name, run the command against the default prox
 with the current directory mounted.`,
 	Args: cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		runUnderTerminal()
 		proxyPort, _ := cmd.Flags().GetInt("proxy-port")
 		rebuild, _ := cmd.Flags().GetBool("rebuild")
 		dockerBin, _ := cmd.Flags().GetString("docker")

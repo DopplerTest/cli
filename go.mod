@@ -7,6 +7,7 @@ require (
 	github.com/AlecAivazis/survey/v2 v2.3.6
 	github.com/DopplerHQ/gocui v0.1.0
 	github.com/atotto/clipboard v0.1.4
+	github.com/creack/pty v1.1.17
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.9.0
 	github.com/jedib0t/go-pretty v4.3.0+incompatible
@@ -59,6 +60,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.mongodb.org/mongo-driver v1.17.9 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
+	golang.org/x/term v0.45.0
 	golang.org/x/text v0.40.0 // indirect
 )
