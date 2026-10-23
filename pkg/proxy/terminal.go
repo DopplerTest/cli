@@ -41,12 +41,6 @@ func RunUnderTerminal(cmd *exec.Cmd, onCopy func(text string)) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	ptmx, err := pty.StartWithSize(cmd, size)
-	if err != nil {
-		return 1, err
-	}
-	defer ptmx.Close()
-
 	// The real terminal goes raw so keystrokes reach the child unedited; the child's own
 	// terminal handling (docker's, then the agent's) takes it from there.
 	state, err := term.MakeRaw(stdin)
@@ -54,6 +48,12 @@ func RunUnderTerminal(cmd *exec.Cmd, onCopy func(text string)) (int, error) {
 		return 1, err
 	}
 	defer term.Restore(stdin, state) //nolint:errcheck
+
+	ptmx, err := pty.StartWithSize(cmd, size)
+	if err != nil {
+		return 1, err
+	}
+	defer ptmx.Close()
 
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, syscall.SIGWINCH, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
