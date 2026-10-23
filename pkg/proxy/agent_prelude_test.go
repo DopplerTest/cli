@@ -78,6 +78,15 @@ func TestWrapRunOnboardingOnlyForClaudeWithAToken(t *testing.T) {
 	}
 }
 
+func TestWrapRunKeepsClaudeOnTheClassicRenderer(t *testing.T) {
+	if !strings.Contains(scriptOf(t, WrapRun([]string{"claude"}, nil, false)), "CLAUDE_CODE_NO_FLICKER=0") {
+		t.Error("claude should run with the classic renderer")
+	}
+	if strings.Contains(scriptOf(t, WrapRun([]string{"codex"}, nil, false)), "CLAUDE_CODE_NO_FLICKER") {
+		t.Error("the renderer setting is a Claude quirk and must not apply to other agents")
+	}
+}
+
 func TestWrapRunLeavesAnEmptyCommandAlone(t *testing.T) {
 	if got := WrapRun(nil, []string{"CLAUDE_CODE_OAUTH_TOKEN"}, false); got != nil {
 		t.Fatalf("expected nil, got %v", got)
