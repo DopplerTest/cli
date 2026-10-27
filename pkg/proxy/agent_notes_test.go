@@ -34,6 +34,7 @@ func TestSandboxNotesSayWhatTheAgentNeeds(t *testing.T) {
 		"Any other secret",            // the rest have no destination yet
 		"Doppler agent-proxy refused", // how a refusal looks
 		"Tell the user",               // the correct response to one
+		"The AWS CLI and SDKs show",   // a 403 with no body is the same refusal
 		"/home/agent",                 // what persists
 		"/workspace/",
 	} {

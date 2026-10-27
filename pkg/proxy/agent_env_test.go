@@ -188,6 +188,22 @@ func TestMergeAgentEnvAgentWins(t *testing.T) {
 	}
 }
 
+// The sandbox defaults keep an AWS SDK or the aws CLI off aws-chunked uploads, which
+// the proxy cannot sign, and give way to a value the user stores themselves.
+func TestSandboxDefaultsSitUnderSharedAndAgentEnv(t *testing.T) {
+	if got := SandboxDefaults["AWS_REQUEST_CHECKSUM_CALCULATION"]; got != "when_required" {
+		t.Fatalf("AWS_REQUEST_CHECKSUM_CALCULATION = %q, want when_required", got)
+	}
+	shared := map[string]string{"AWS_REQUEST_CHECKSUM_CALCULATION": "when_supported"}
+	if got := MergeAgentEnv(nil, MergeAgentEnv(shared, SandboxDefaults)); got["AWS_REQUEST_CHECKSUM_CALCULATION"] != "when_supported" {
+		t.Fatalf("a shared value must override the default; got %v", got)
+	}
+	agent := map[string]string{"AWS_REQUEST_CHECKSUM_CALCULATION": "when_supported"}
+	if got := MergeAgentEnv(agent, MergeAgentEnv(nil, SandboxDefaults)); got["AWS_REQUEST_CHECKSUM_CALCULATION"] != "when_supported" {
+		t.Fatalf("the agent's own value must override the default; got %v", got)
+	}
+}
+
 // A credential stored only in the shared file still reaches the run: the merged
 // names are what `agent run` exports and hands to the prelude, so the Claude
 // onboarding check must fire from the shared token alone.
