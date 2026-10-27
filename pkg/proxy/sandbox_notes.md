@@ -20,11 +20,12 @@ like that are refused.
 ## When a request is refused
 
 A refused request comes back as HTTP 403 with a body that starts
-"Doppler agent-proxy refused", or the connection fails. It means that destination is
-not allowed for that secret, or the host is not reachable from this sandbox. Do not
-retry it or look for another way to reach it. Tell the user which secret and which
-host you need and what for; they can allow it from the Doppler Agent Proxy app.
-Nothing inside this sandbox can change what is allowed.
+"Doppler agent-proxy refused", or the connection fails. The AWS CLI and SDKs show
+only the 403 and not the body, so treat a 403 from them the same way. It means that
+destination is not allowed for that secret, or the host is not reachable from this
+sandbox. Do not retry it or look for another way to reach it. Tell the user which
+secret and which host you need and what for; they can allow it from the Doppler Agent
+Proxy app. Nothing inside this sandbox can change what is allowed.
 
 ## Files
 

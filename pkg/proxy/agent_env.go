@@ -39,6 +39,15 @@ const agentLocalEnvFile = "env"
 
 var envKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
+// SandboxDefaults are the entries every sandbox starts with. They sit beneath the
+// shared environment and the agent's own, so either can override them.
+//
+// AWS_REQUEST_CHECKSUM_CALCULATION: by default the AWS SDKs and CLI upload in
+// aws-chunked bodies, signed chunk by chunk with the secret key the agent holds, which
+// in the sandbox is a placeholder. The proxy cannot sign those and refuses them.
+// when_required makes the SDKs send a whole body instead, which the proxy signs.
+var SandboxDefaults = map[string]string{"AWS_REQUEST_CHECKSUM_CALCULATION": "when_required"}
+
 // AgentLocalEnvPath is the file holding the agent's local environment, mode 0600.
 func AgentLocalEnvPath(dir string) string { return filepath.Join(dir, agentLocalEnvFile) }
 
