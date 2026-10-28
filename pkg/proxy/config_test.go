@@ -578,3 +578,23 @@ func TestScaffoldExampleSurvivesSync(t *testing.T) {
 		t.Errorf("the real stub should have been added\n%s", data)
 	}
 }
+
+// The other half of a two-secret credential never has a binding of its own: the proxy
+// brokers it under the secret that names it, so the startup check leaves it alone.
+func TestSecretsWithoutBindingExemptsTheOtherHalfOfAPair(t *testing.T) {
+	c := &ProxyConfig{
+		Bindings: map[string][]agentproxy.Rule{
+			"AWS_SECRET_ACCESS_KEY": {{Host: "s3.amazonaws.com"}},
+			"STRIPE_SECRET":         {{Host: "api.stripe.com"}},
+		},
+		Methods: map[string]CredentialMethod{
+			"AWS_SECRET_ACCESS_KEY": {Kind: "aws_sigv4", AccessKeyID: "AWS_ACCESS_KEY_ID"},
+			"STRIPE_SECRET":         {Kind: "oauth2_client_credentials", TokenURL: "https://t", ClientID: "STRIPE_CLIENT_ID"},
+		},
+	}
+	names := []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "STRIPE_CLIENT_ID", "STRIPE_SECRET", "GITHUB_TOKEN"}
+	got := c.SecretsWithoutBinding(names)
+	if len(got) != 1 || got[0] != "GITHUB_TOKEN" {
+		t.Fatalf("SecretsWithoutBinding = %v, want only GITHUB_TOKEN", got)
+	}
+}
