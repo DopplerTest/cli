@@ -233,6 +233,27 @@ var agentCreateCmd = &cobra.Command{
 	},
 }
 
+// backfillWorkplaces records the workplace of every listed agent that has none yet,
+// from the agent's own token, so agents from before the workplace was kept sort
+// themselves out on the first listing rather than each having to be started first.
+// Best effort: an agent whose lookup fails is listed as it is and tried again next time.
+func backfillWorkplaces(configDir string, agents []proxy.AgentProfile, lookup func(token string) (models.ActorWorkplaceInfo, error)) []proxy.AgentProfile {
+	for i := range agents {
+		if agents[i].WorkplaceSlug != "" {
+			continue
+		}
+		token := proxy.ReadAgentToken(proxy.AgentDir(configDir, agents[i].Name))
+		if token == "" {
+			continue
+		}
+		p := agents[i]
+		if err := recordAgentWorkplace(configDir, &p, func() (models.ActorWorkplaceInfo, error) { return lookup(token) }); err == nil {
+			agents[i] = p
+		}
+	}
+	return agents
+}
+
 var agentListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List agents",
@@ -242,6 +263,11 @@ var agentListCmd = &cobra.Command{
 		if err != nil {
 			utils.HandleError(err, "unable to list agents")
 		}
+		localConfig := configuration.LocalConfig(cmd)
+		host, verifyTLS := localConfig.APIHost.Value, utils.GetBool(localConfig.VerifyTLS.Value, true)
+		agents = backfillWorkplaces(configuration.UserConfigDir, agents, func(token string) (models.ActorWorkplaceInfo, error) {
+			return actorWorkplace(host, verifyTLS, token)()
+		})
 		if utils.OutputJSON {
 			views := make([]agentView, 0, len(agents))
 			for _, a := range agents {
