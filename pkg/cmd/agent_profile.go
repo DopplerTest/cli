@@ -106,6 +106,35 @@ func agentScopedConfig(cmd *cobra.Command, p *proxy.AgentProfile) models.ScopedO
 	return lc
 }
 
+// actorWorkplace looks up the workplace a token belongs to.
+func actorWorkplace(host string, verifyTLS bool, token string) func() (models.ActorWorkplaceInfo, error) {
+	return func() (models.ActorWorkplaceInfo, error) {
+		info, herr := http.GetActorInfo(host, verifyTLS, token)
+		if !herr.IsNil() {
+			return models.ActorWorkplaceInfo{}, herr.Unwrap()
+		}
+		return info.Workplace, nil
+	}
+}
+
+// recordAgentWorkplace fills in the workplace an agent belongs to, when the profile
+// does not have it yet, and saves the profile. The workplace is a label the app sorts
+// agents by, never a gate on the run, so a failed lookup is left for a later run.
+func recordAgentWorkplace(configDir string, p *proxy.AgentProfile, lookup func() (models.ActorWorkplaceInfo, error)) error {
+	if p.WorkplaceSlug != "" {
+		return nil
+	}
+	wp, err := lookup()
+	if err != nil {
+		return err
+	}
+	if wp.Slug == "" {
+		return errors.New("the API reported no workplace for the token")
+	}
+	p.WorkplaceSlug, p.WorkplaceName = wp.Slug, wp.Name
+	return proxy.SaveAgent(configDir, p)
+}
+
 var agentCreateCmd = &cobra.Command{
 	Use:   "create <name>",
 	Short: "Create a named agent: a project and config, a service token minted for it, a command, and the directories it can see",
@@ -173,6 +202,11 @@ var agentCreateCmd = &cobra.Command{
 			TokenName:      minted.Name,
 			TokenExpiresAt: minted.ExpiresAt,
 			CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		}
+		// The workplace comes from the login that is creating the agent. When the
+		// lookup fails the agent is still created, and the first run records it.
+		if wp, err := actorWorkplace(localConfig.APIHost.Value, verifyTLS, localConfig.Token.Value)(); err == nil {
+			p.WorkplaceSlug, p.WorkplaceName = wp.Slug, wp.Name
 		}
 		if err := proxy.SaveAgent(configuration.UserConfigDir, p); err != nil {
 			utils.HandleError(err, "unable to save the agent")

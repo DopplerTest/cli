@@ -185,6 +185,10 @@ var proxyStartCmd = &cobra.Command{
 		var localConfig models.ScopedOptions
 		if agent != nil {
 			localConfig = agentScopedConfig(cmd, agent)
+			// An agent from before the workplace was recorded gets it from its own
+			// token here, so the app can sort it with the rest. Best effort: the proxy
+			// starts either way.
+			_ = recordAgentWorkplace(configuration.UserConfigDir, agent, actorWorkplace(localConfig.APIHost.Value, utils.GetBool(localConfig.VerifyTLS.Value, true), localConfig.Token.Value))
 		} else {
 			localConfig = configuration.LocalConfig(cmd)
 		}

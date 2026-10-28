@@ -49,6 +49,12 @@ type AgentProfile struct {
 	// or "" when the token was minted without one.
 	TokenExpiresAt string `yaml:"token_expires_at,omitempty" json:"token_expires_at"`
 	CreatedAt      string `yaml:"created_at" json:"created_at"`
+	// WorkplaceSlug and WorkplaceName record the workplace the agent was created in,
+	// so the app can show a login only the agents of its own workplace. Empty on agents
+	// created before the fields existed; `proxy start` fills them in from the agent's
+	// own token, which belongs to exactly one workplace.
+	WorkplaceSlug string `yaml:"workplace_slug,omitempty" json:"workplace_slug"`
+	WorkplaceName string `yaml:"workplace_name,omitempty" json:"workplace_name"`
 }
 
 const (
