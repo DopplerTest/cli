@@ -32,3 +32,26 @@ func TestAgentProfileRoundTripsTokenExpiry(t *testing.T) {
 		t.Fatalf("TokenExpiresAt = %q, want the saved value", got.TokenExpiresAt)
 	}
 }
+
+func TestAgentProfileRoundTripsWorkplace(t *testing.T) {
+	dir := t.TempDir()
+	p := &AgentProfile{Name: "demo", Project: "proj", Config: "dev", WorkplaceSlug: "acme", WorkplaceName: "Acme"}
+	if err := SaveAgent(dir, p); err != nil {
+		t.Fatalf("SaveAgent: %v", err)
+	}
+	got, err := LoadAgent(dir, "demo")
+	if err != nil {
+		t.Fatalf("LoadAgent: %v", err)
+	}
+	if got.WorkplaceSlug != "acme" || got.WorkplaceName != "Acme" {
+		t.Fatalf("workplace = %q %q, want the saved values", got.WorkplaceSlug, got.WorkplaceName)
+	}
+	// A profile from before the fields existed reads back with them empty.
+	legacy := &AgentProfile{Name: "old", Project: "proj", Config: "dev"}
+	if err := SaveAgent(dir, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := LoadAgent(dir, "old"); got.WorkplaceSlug != "" {
+		t.Fatalf("legacy WorkplaceSlug = %q, want empty", got.WorkplaceSlug)
+	}
+}
