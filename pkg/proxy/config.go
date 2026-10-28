@@ -494,14 +494,24 @@ func (c *ProxyConfig) SyncBindings() bool {
 }
 
 // unboundExempt reports whether a secret is expected to have no binding.
-// Doppler's own metadata values are never injected anywhere, and a pass_by_value
-// secret is handed to the agent directly rather than brokered, so neither is a
-// missing binding.
+// Doppler's own metadata values are never injected anywhere, a pass_by_value
+// secret is handed to the agent directly rather than brokered, and the other half
+// of a two-secret credential (an AWS key's access key id, an OAuth2 client's id) is
+// brokered under the binding of the secret that names it, so none is a missing
+// binding.
 func (c *ProxyConfig) unboundExempt(name string) bool {
 	if strings.HasPrefix(name, "DOPPLER_") {
 		return true
 	}
-	return slices.Contains(c.PassByValue, name)
+	if slices.Contains(c.PassByValue, name) {
+		return true
+	}
+	for _, m := range c.Methods {
+		if (m.Kind == "aws_sigv4" && m.AccessKeyID == name) || (m.Kind == "oauth2_client_credentials" && m.ClientID == name) {
+			return true
+		}
+	}
+	return false
 }
 
 // SecretsWithoutBinding returns the names, in the order given, that carry no active
