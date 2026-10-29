@@ -27,6 +27,10 @@ import (
 //
 // Additional engines register themselves the same way, which is what makes the
 // --engine flag pluggable.
+// The masked-hash engine takes a change of policy in place, so proxy start can reload
+// a saved config without minting new masks.
+var _ Reloader = (*agentproxy.Server)(nil)
+
 func init() {
 	Register("masked-hash", func(opts Options) (Engine, error) {
 		return agentproxy.New(agentproxy.Config{
