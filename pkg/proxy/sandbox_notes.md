@@ -19,6 +19,13 @@ request body; requests like that are refused. A few values are not placeholders,
 because that service is one this sandbox reaches directly, such as your own provider
 login; use those exactly as you find them too.
 
+AWS requests are signed for you. The AWS CLI and SDKs work as usual with the
+placeholders in your environment. For a one-off call without them, send the request
+with curl and put the placeholder of either AWS key, the access key id or the secret
+access key, in the Authorization header, for example
+`-H "Authorization: Bearer $AWS_SECRET_ACCESS_KEY"`. It is replaced with a real
+signature as the request leaves. Never compute an AWS signature yourself.
+
 The real values never reach you, and you never need them. Do not ask the user for a
 credential's value, and if one is pasted into the conversation do not use it; ask
 the user to put it in Doppler instead, where it will reach you as a placeholder.

@@ -43,6 +43,9 @@ func TestSandboxNotesSayWhatTheAgentNeeds(t *testing.T) {
 		"do the task the way you would anywhere else",              // the sandbox is not the job
 		"do not use it",                                            // a credential pasted into the conversation
 		"a refusal is the user's decision",                         // never route around one
+		"AWS requests are signed for you",                          // so the agent never signs one itself
+		"either AWS key",                                           // a one-off call works with either half
+		"Never compute an AWS signature yourself",                  // the placeholders cannot sign anyway
 		"gh auth setup-git",                                        // git over HTTPS with the GitHub credential
 		"read-only",                                                // a mount the user chose to protect
 		"/home/agent",                                              // what persists
