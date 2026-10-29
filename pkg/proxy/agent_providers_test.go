@@ -126,3 +126,22 @@ func TestSharedEnvForGivesEachAgentItsOwnCredentials(t *testing.T) {
 		}
 	}
 }
+
+// The proxy guards an agent's own credentials only while every host of its provider
+// is passed through, since a provider host it inspected would see the credential
+// refused. Agents it cannot tie to a provider get no guard.
+func TestGuardedCredentialsNeedEveryProviderHostPassedThrough(t *testing.T) {
+	env := map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-login", "MY_OWN_TOKEN": "custom"}
+	all := ProviderHosts([]string{"claude"})
+	if got := GuardedCredentials("claude", env, all); !reflect.DeepEqual(got, map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-login"}) {
+		t.Fatalf("with every Claude host passed through, its login should be guarded; got %v", got)
+	}
+	if got := GuardedCredentials("claude", env, all[1:]); len(got) != 0 {
+		t.Fatalf("with api.anthropic.com inspected, nothing should be guarded; got %v", got)
+	}
+	for _, agent := range []string{"other", ""} {
+		if got := GuardedCredentials(agent, env, all); len(got) != 0 {
+			t.Fatalf("an agent of type %q cannot be tied to a provider; got %v", agent, got)
+		}
+	}
+}

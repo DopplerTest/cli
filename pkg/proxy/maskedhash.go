@@ -47,6 +47,7 @@ func init() {
 			AllowProtocolUpgrades: opts.AllowProtocolUpgrades,
 			Methods:               opts.Methods,
 			PassByValue:           opts.PassByValue,
+			AgentCredentials:      opts.AgentCredentials,
 		})
 	})
 }

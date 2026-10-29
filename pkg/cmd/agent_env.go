@@ -101,9 +101,10 @@ The value is read from stdin:
 
     echo "$TOKEN" | doppler-beta agent env set backend-claude CLAUDE_CODE_OAUTH_TOKEN
 
-It is kept in a 0600 file beside the agent's profile. It is never written to Doppler
-and the proxy never sees it, which is what a provider credential needs, since the
-proxy tunnels provider hosts without inspection and could not swap a masked value in.
+It is kept in a 0600 file beside the agent's profile. It is never written to Doppler.
+A provider credential has to be held for real, since the proxy tunnels provider hosts
+without inspection and could not swap a masked value in. The proxy only uses it to
+refuse a request that carries it to any other host.
 
 With --shared the value is stored once for every agent instead of for one. A known
 provider's credential, such as CLAUDE_CODE_OAUTH_TOKEN, reaches only agents of that

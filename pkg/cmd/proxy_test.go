@@ -82,6 +82,25 @@ func TestEngineOptionsCarryEverySetting(t *testing.T) {
 	}
 }
 
+// An agent's own provider login reaches the engine to be guarded once its provider's
+// hosts are all passed through, and another provider's never does.
+func TestEngineOptionsGuardTheAgentsOwnCredential(t *testing.T) {
+	cfg := &proxy.ProxyConfig{Passthrough: proxy.ProviderHosts([]string{"claude"})}
+	opts, err := engineOptions(cfg, proxyStartInputs{
+		dataDir:   t.TempDir(),
+		logOut:    io.Discard,
+		source:    staticSource{},
+		agentType: "claude",
+		agentEnv:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-login", "OPENAI_API_KEY": "openai-key"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.AgentCredentials) != 1 || opts.AgentCredentials["CLAUDE_CODE_OAUTH_TOKEN"] != "claude-login" {
+		t.Fatalf("only the Claude login should be guarded; got %v", opts.AgentCredentials)
+	}
+}
+
 func TestEngineOptionsRejectUnknownUnboundPolicy(t *testing.T) {
 	if _, err := engineOptions(&proxy.ProxyConfig{Unbound: "maybe"}, proxyStartInputs{logOut: io.Discard, source: staticSource{}}); err == nil {
 		t.Fatal("an unknown unbound policy must be an error")

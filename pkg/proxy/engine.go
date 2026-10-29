@@ -67,6 +67,9 @@ type Options struct {
 	Methods map[string]agentproxy.MethodConfig
 	// PassByValue names the secrets written to the agent env as real values.
 	PassByValue []string
+	// AgentCredentials are the agent's own provider credentials, which it holds for
+	// real. The engine refuses them toward any host it inspects.
+	AgentCredentials map[string]string
 }
 
 // Factory builds an Engine from Options.
