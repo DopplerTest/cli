@@ -45,6 +45,16 @@ func NewDopplerSource(config models.ScopedOptions) agentproxy.SecretSource {
 }
 
 // load fetches the config's secrets and replaces the snapshot.
+// dopplerMetadata are the names Doppler adds to every config to describe it. They are
+// labels, not credentials: masking them gave the agent useless placeholders, and their
+// values (a project slug, "dev") turn up in ordinary traffic, where guarding them
+// refused requests and redacting them rewrote downloads.
+var dopplerMetadata = map[string]bool{
+	"DOPPLER_PROJECT":     true,
+	"DOPPLER_CONFIG":      true,
+	"DOPPLER_ENVIRONMENT": true,
+}
+
 func (s *dopplerSource) load() (map[string]string, error) {
 	computed, err := controllers.GetSecrets(s.config)
 	if !err.IsNil() {
@@ -52,7 +62,7 @@ func (s *dopplerSource) load() (map[string]string, error) {
 	}
 	m := make(map[string]string, len(computed))
 	for name, cs := range computed {
-		if cs.ComputedValue != nil {
+		if cs.ComputedValue != nil && !dopplerMetadata[name] {
 			m[name] = *cs.ComputedValue
 		}
 	}
