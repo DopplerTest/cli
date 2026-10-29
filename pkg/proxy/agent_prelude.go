@@ -40,6 +40,12 @@ var instructionFiles = map[string]string{
 	"gemini": ".gemini/GEMINI.md",
 }
 
+// Aider has no standing instruction file of its own; it takes files to read for
+// context on the command line, so the notes file is handed to it that way unless
+// the command already names it.
+const aiderNotesPrelude = `case " $* " in *" --read $HOME/DOPPLER_SANDBOX.md "*|*" --read ~/DOPPLER_SANDBOX.md "*) ;; *) set -- "$@" --read "$HOME/DOPPLER_SANDBOX.md" ;; esac
+`
+
 const notesPrelude = `if [ -n "$DOPPLER_SANDBOX_NOTES" ]; then
   printf '%s\n' "$DOPPLER_SANDBOX_NOTES" > "$HOME/DOPPLER_SANDBOX.md"
 fi
@@ -129,6 +135,9 @@ func WrapRun(command []string, envKeys []string, resume bool) []string {
 	b.WriteString(notesPrelude)
 	if file, ok := instructionFiles[program]; ok {
 		b.WriteString(fmt.Sprintf(mergePreludeFmt, file))
+	}
+	if program == "aider" {
+		b.WriteString(aiderNotesPrelude)
 	}
 	if program == "claude" && contains(envKeys, "CLAUDE_CODE_OAUTH_TOKEN") {
 		b.WriteString(claudeOnboardingPrelude)

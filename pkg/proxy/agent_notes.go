@@ -52,7 +52,7 @@ func renderBindings(cfg *ProxyConfig) string {
 		}
 	}
 	if len(names) == 0 {
-		return "No secret has an allowed destination yet."
+		return "No secret has an allowed destination yet. Each is allowed on first use, by the user."
 	}
 	sort.Strings(names)
 	var b strings.Builder
@@ -63,6 +63,6 @@ func renderBindings(cfg *ProxyConfig) string {
 		}
 		b.WriteString("- " + name + ": " + strings.Join(hosts, ", ") + "\n")
 	}
-	b.WriteString("\nAny other secret in your environment has no allowed destination yet.")
+	b.WriteString("\nAny other secret in your environment has no allowed destination yet; the user is asked on first use.")
 	return b.String()
 }

@@ -31,11 +31,21 @@ func TestSandboxNotesSayWhatTheAgentNeeds(t *testing.T) {
 		"exactly as you find them", // how to use one
 		"GITHUB_TOKEN: api.github.com, uploads.github.com", // allowed destinations, hosts joined
 		"STRIPE_KEY: api.stripe.com",
-		"Any other secret",            // the rest have no destination yet
-		"Doppler agent-proxy refused", // how a refusal looks
-		"Tell the user",               // the correct response to one
-		"The AWS CLI and SDKs show",   // a 403 with no body is the same refusal
-		"/home/agent",                 // what persists
+		"Any other secret",                                         // the rest have no destination yet
+		"Doppler agent-proxy refused",                              // how a refusal looks
+		"Tell the user",                                            // the correct response to one
+		"The AWS CLI and SDKs show",                                // a 403 with no body is the same refusal
+		"waiting for them to approve",                              // what to say while the user decides
+		"set the policy for secrets with no binding to \"Ask me\"", // the remedy when nobody is asked
+		"pip install --user",                                       // how to get tools without root
+		"ask the user for permission",                              // before installing one
+		"fall back to plain curl",                                  // when a tool cannot be installed
+		"do the task the way you would anywhere else",              // the sandbox is not the job
+		"do not use it",                                            // a credential pasted into the conversation
+		"a refusal is the user's decision",                         // never route around one
+		"gh auth setup-git",                                        // git over HTTPS with the GitHub credential
+		"read-only",                                                // a mount the user chose to protect
+		"/home/agent",                                              // what persists
 		"/workspace/",
 	} {
 		if !strings.Contains(n, want) {

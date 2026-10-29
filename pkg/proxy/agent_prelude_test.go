@@ -181,11 +181,26 @@ func TestWrapRunResumeKeepsACommandThatAlreadyResumes(t *testing.T) {
 }
 
 func TestWrapRunResumeStartsFreshForAnUnknownProgram(t *testing.T) {
-	script := scriptOf(t, WrapRun([]string{"aider"}, nil, true))
+	script := scriptOf(t, WrapRun([]string{"mytool"}, nil, true))
 	if strings.Contains(script, "set --") {
 		t.Errorf("an unknown program must not have its arguments changed:\n%s", script)
 	}
 	if !strings.Contains(script, "starting a new one") {
 		t.Errorf("the outcome line is still printed:\n%s", script)
+	}
+}
+
+// Aider reads context files from its command line rather than a standing instruction
+// file, so the notes are passed with --read, once.
+func TestWrapRunHandsAiderTheNotesToRead(t *testing.T) {
+	script := scriptOf(t, WrapRun([]string{"aider", "--model", "gpt-4o"}, nil, false))
+	if !strings.Contains(script, `--read "$HOME/DOPPLER_SANDBOX.md"`) {
+		t.Fatalf("aider should be given the notes file to read:\n%s", script)
+	}
+	if !strings.Contains(script, `*" --read $HOME/DOPPLER_SANDBOX.md "*`) {
+		t.Fatalf("a command that already reads the notes must not get the flag twice:\n%s", script)
+	}
+	if strings.Contains(scriptOf(t, WrapRun([]string{"codex"}, nil, false)), "--read") {
+		t.Error("the --read flag is aider's and must not apply to other agents")
 	}
 }
