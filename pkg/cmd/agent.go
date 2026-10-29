@@ -178,7 +178,7 @@ with the current directory mounted.`,
 			if err != nil {
 				utils.HandleError(err, "unable to read the shared environment")
 			}
-			userEnv := proxy.MergeAgentEnv(localEnv, sharedEnv)
+			userEnv := proxy.MergeAgentEnv(localEnv, proxy.SharedEnvFor(agent.Agent, sharedEnv))
 			defaults := proxy.MergeAgentEnv(proxy.AWSRegionEnv(scope, userEnv), proxy.SandboxDefaults)
 			envNames = proxy.ExportAgentEnv(proxy.MergeAgentEnv(userEnv, defaults))
 			// The sandbox notes ride in the same way: exported here, named to docker, so

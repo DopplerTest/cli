@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/DopplerHQ/cli/pkg/configuration"
@@ -100,11 +101,14 @@ The value is read from stdin:
 
     echo "$TOKEN" | doppler-beta agent env set backend-claude CLAUDE_CODE_OAUTH_TOKEN
 
-It is kept in a 0600 file beside the agent's profile. It is never written to Doppler
-and the proxy never sees it, which is what a provider credential needs, since the
-proxy tunnels provider hosts without inspection and could not swap a masked value in.
+It is kept in a 0600 file beside the agent's profile. It is never written to Doppler.
+A provider credential has to be held for real, since the proxy tunnels provider hosts
+without inspection and could not swap a masked value in. The proxy only uses it to
+refuse a request that carries it to any other host.
 
-With --shared the value is stored once for every agent instead of for one:
+With --shared the value is stored once for every agent instead of for one. A known
+provider's credential, such as CLAUDE_CODE_OAUTH_TOKEN, reaches only agents of that
+provider's type:
 
     echo "$TOKEN" | doppler-beta agent env set --shared CLAUDE_CODE_OAUTH_TOKEN
 
@@ -147,7 +151,7 @@ An agent's own value for the same name wins over the shared one.`,
 			return
 		}
 		if target.shared() {
-			utils.Log(fmt.Sprintf("Stored %s for every agent. It is handed to the sandbox when an agent runs and never leaves this machine.", key))
+			utils.Log(fmt.Sprintf("Stored %s for every agent that uses it. It is handed to the sandbox when an agent runs and never leaves this machine.", key))
 			return
 		}
 		utils.Log(fmt.Sprintf("Stored %s for agent %s. It is handed to the sandbox when the agent runs and never leaves this machine.", key, target.agent))
@@ -204,9 +208,17 @@ var agentEnvListCmd = &cobra.Command{
 			}
 			return
 		}
-		sharedKeys := proxy.SharedEnvKeys(configuration.UserConfigDir)
-		if sharedKeys == nil {
-			sharedKeys = []string{}
+		// Only the shared names this agent is handed: another provider's credential is not.
+		sharedKeys := []string{}
+		if shared, err := proxy.ReadSharedEnv(configuration.UserConfigDir); err == nil {
+			agentType := ""
+			if p, err := proxy.LoadAgent(configuration.UserConfigDir, target.agent); err == nil {
+				agentType = p.Agent
+			}
+			for key := range proxy.SharedEnvFor(agentType, shared) {
+				sharedKeys = append(sharedKeys, key)
+			}
+			sort.Strings(sharedKeys)
 		}
 		if utils.OutputJSON {
 			printJSON(map[string]any{"agent": target.agent, "keys": keys, "shared_keys": sharedKeys})
@@ -221,7 +233,7 @@ var agentEnvListCmd = &cobra.Command{
 		if len(sharedKeys) == 0 {
 			return
 		}
-		utils.Print("Shared with every agent:")
+		utils.Print("Inherited from the shared environment:")
 		for _, k := range sharedKeys {
 			utils.Print(k)
 		}
