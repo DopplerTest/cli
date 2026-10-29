@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -86,5 +87,42 @@ func TestProviderHostsForPrefersTheAgentField(t *testing.T) {
 	}
 	if !IsKnownAgent("aider") || IsKnownAgent("cursor") {
 		t.Fatal("IsKnownAgent is wrong")
+	}
+}
+
+// Each agent is handed only its own provider's credentials from the shared store,
+// by the type the user picked: a Codex agent never holds the Claude login. Keys that
+// are no provider's credential reach every agent, and an agent of type other, or from
+// before the type was recorded, keeps receiving everything.
+func TestSharedEnvForGivesEachAgentItsOwnCredentials(t *testing.T) {
+	shared := map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": "claude-login",
+		"OPENAI_API_KEY":          "openai-key",
+		"GEMINI_API_KEY":          "gemini-key",
+		"ANTHROPIC_API_KEY":       "anthropic-key",
+		"MY_OWN_TOKEN":            "custom",
+	}
+	keys := func(env map[string]string) []string {
+		var out []string
+		for k := range env {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	for _, tc := range []struct {
+		agent string
+		want  []string
+	}{
+		{"claude", []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MY_OWN_TOKEN"}},
+		{"codex", []string{"MY_OWN_TOKEN", "OPENAI_API_KEY"}},
+		{"gemini", []string{"GEMINI_API_KEY", "MY_OWN_TOKEN"}},
+		{"aider", []string{"ANTHROPIC_API_KEY", "MY_OWN_TOKEN", "OPENAI_API_KEY"}},
+		{"other", keys(shared)},
+		{"", keys(shared)},
+	} {
+		if got := keys(SharedEnvFor(tc.agent, shared)); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%q agent receives %v, want %v", tc.agent, got, tc.want)
+		}
 	}
 }

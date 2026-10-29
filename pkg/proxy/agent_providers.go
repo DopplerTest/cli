@@ -33,6 +33,44 @@ var providerHosts = map[string][]string{
 	"aider":  {"api.openai.com", "api.anthropic.com"},
 }
 
+// The credentials each known agent signs in to its provider with. Stored once in the
+// shared environment, each reaches only agents of the type that uses it, so an agent
+// never holds another provider's login.
+var providerCredentials = map[string][]string{
+	"claude": {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"},
+	"codex":  {"OPENAI_API_KEY"},
+	"gemini": {"GEMINI_API_KEY"},
+	"aider":  {"OPENAI_API_KEY", "ANTHROPIC_API_KEY"},
+}
+
+// SharedEnvFor returns the shared entries an agent of the given type receives: all of
+// them except other providers' credentials. An agent of type other, or one from
+// before the type was recorded, receives them all, since nothing says which provider
+// it signs in to. The type is the one the user picked, never read from the command.
+func SharedEnvFor(agent string, shared map[string]string) map[string]string {
+	own, known := providerCredentials[agent]
+	if !known {
+		return shared
+	}
+	out := make(map[string]string, len(shared))
+	for key, value := range shared {
+		if isProviderCredential(key) && !slices.Contains(own, key) {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func isProviderCredential(key string) bool {
+	for _, keys := range providerCredentials {
+		if slices.Contains(keys, key) {
+			return true
+		}
+	}
+	return false
+}
+
 // KnownAgents are the values the agent field accepts: the provider families the proxy
 // knows hosts for, plus "other" for anything else.
 var KnownAgents = []string{"claude", "codex", "gemini", "aider", "other"}
