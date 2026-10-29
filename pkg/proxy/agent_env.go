@@ -48,6 +48,32 @@ var envKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 // when_required makes the SDKs send a whole body instead, which the proxy signs.
 var SandboxDefaults = map[string]string{"AWS_REQUEST_CHECKSUM_CALCULATION": "when_required"}
 
+// AWSRegionEnv is the region the config's AWS signing pairs name, as AWS_REGION and
+// AWS_DEFAULT_REGION. Without one the AWS CLI and SDKs ask the instance metadata
+// endpoint for a region, which the sandbox cannot reach. Pairs that name different
+// regions leave both unset, since no one default suits them all. So does a region the
+// user already stores in env under either name: the AWS tools read AWS_REGION first,
+// so adding it would override a stored AWS_DEFAULT_REGION.
+func AWSRegionEnv(cfg *ProxyConfig, env map[string]string) map[string]string {
+	if env["AWS_REGION"] != "" || env["AWS_DEFAULT_REGION"] != "" {
+		return nil
+	}
+	region := ""
+	for _, m := range cfg.Methods {
+		if m.Kind != "aws_sigv4" || m.Region == "" {
+			continue
+		}
+		if region != "" && region != m.Region {
+			return nil
+		}
+		region = m.Region
+	}
+	if region == "" {
+		return nil
+	}
+	return map[string]string{"AWS_REGION": region, "AWS_DEFAULT_REGION": region}
+}
+
 // AgentLocalEnvPath is the file holding the agent's local environment, mode 0600.
 func AgentLocalEnvPath(dir string) string { return filepath.Join(dir, agentLocalEnvFile) }
 
