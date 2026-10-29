@@ -204,6 +204,42 @@ func TestSandboxDefaultsSitUnderSharedAndAgentEnv(t *testing.T) {
 	}
 }
 
+// The region set on the agent's AWS signing pairs reaches the sandbox, so the aws CLI
+// and SDKs do not go looking for one at the instance metadata endpoint.
+func TestAWSRegionEnvCarriesThePairsRegion(t *testing.T) {
+	pair := func(region string) CredentialMethod {
+		return CredentialMethod{Kind: "aws_sigv4", Region: region, AccessKeyID: "AWS_ACCESS_KEY_ID"}
+	}
+	for _, tc := range []struct {
+		name    string
+		methods map[string]CredentialMethod
+		want    map[string]string
+	}{
+		{"one pair", map[string]CredentialMethod{"AWS_SECRET_ACCESS_KEY": pair("us-west-2")},
+			map[string]string{"AWS_REGION": "us-west-2", "AWS_DEFAULT_REGION": "us-west-2"}},
+		{"pairs that agree", map[string]CredentialMethod{"A": pair("eu-west-1"), "B": pair("eu-west-1"), "C": pair("")},
+			map[string]string{"AWS_REGION": "eu-west-1", "AWS_DEFAULT_REGION": "eu-west-1"}},
+		{"pairs that disagree", map[string]CredentialMethod{"A": pair("eu-west-1"), "B": pair("us-east-2")}, nil},
+		{"no region", map[string]CredentialMethod{"AWS_SECRET_ACCESS_KEY": pair("")}, nil},
+		{"other methods", map[string]CredentialMethod{"CLIENT_SECRET": {Kind: "oauth2_client_credentials", Region: "us-west-2"}}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := AWSRegionEnv(&ProxyConfig{Methods: tc.methods}, nil); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("AWSRegionEnv = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// A region the user stores, under either name, stands alone: AWS_REGION is read
+	// first, so the pair's would otherwise override a stored AWS_DEFAULT_REGION.
+	cfg := &ProxyConfig{Methods: map[string]CredentialMethod{"K": pair("us-west-2")}}
+	for _, stored := range []string{"AWS_REGION", "AWS_DEFAULT_REGION"} {
+		if got := AWSRegionEnv(cfg, map[string]string{stored: "ap-south-1"}); got != nil {
+			t.Fatalf("with %s stored, AWSRegionEnv = %v, want nothing", stored, got)
+		}
+	}
+}
+
 // A credential stored only in the shared file still reaches the run: the merged
 // names are what `agent run` exports and hands to the prelude, so the Claude
 // onboarding check must fire from the shared token alone.

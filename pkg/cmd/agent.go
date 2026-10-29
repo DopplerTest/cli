@@ -157,13 +157,19 @@ with the current directory mounted.`,
 		// process and only named to docker, so the values are inherited rather than written
 		// into the command line. It never touches Doppler or the proxy. The shared
 		// environment is laid underneath it, and the sandbox defaults underneath both, so
-		// the agent's own value wins on a clash.
+		// the agent's own value wins on a clash. The defaults include the region of the
+		// agent's AWS signing pairs.
 		agentDir := ""
 		if agent != nil {
 			agentDir = proxy.AgentDir(configuration.UserConfigDir, agent.Name)
 		}
 		envNames := proxy.ExportAgentEnv(proxy.SandboxDefaults)
 		if agent != nil {
+			cfg, _, err := proxy.LoadOrScaffold(proxy.AgentConfigPath(agentDir))
+			if err != nil {
+				utils.HandleError(err, "unable to read the agent's proxy config")
+			}
+			scope, _ := cfg.ResolveForConfig(agent.Config)
 			localEnv, err := proxy.ReadAgentEnv(agentDir)
 			if err != nil {
 				utils.HandleError(err, "unable to read the agent's local environment")
@@ -172,14 +178,11 @@ with the current directory mounted.`,
 			if err != nil {
 				utils.HandleError(err, "unable to read the shared environment")
 			}
-			envNames = proxy.ExportAgentEnv(proxy.MergeAgentEnv(localEnv, proxy.MergeAgentEnv(sharedEnv, proxy.SandboxDefaults)))
+			userEnv := proxy.MergeAgentEnv(localEnv, sharedEnv)
+			defaults := proxy.MergeAgentEnv(proxy.AWSRegionEnv(scope, userEnv), proxy.SandboxDefaults)
+			envNames = proxy.ExportAgentEnv(proxy.MergeAgentEnv(userEnv, defaults))
 			// The sandbox notes ride in the same way: exported here, named to docker, so
 			// the text never appears in the command line.
-			cfg, _, err := proxy.LoadOrScaffold(proxy.AgentConfigPath(agentDir))
-			if err != nil {
-				utils.HandleError(err, "unable to read the agent's proxy config")
-			}
-			scope, _ := cfg.ResolveForConfig(agent.Config)
 			if err := os.Setenv(proxy.SandboxNotesEnv, proxy.RenderSandboxNotes(scope)); err != nil {
 				utils.HandleError(err, "unable to prepare the sandbox notes")
 			}
