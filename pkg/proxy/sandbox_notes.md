@@ -26,6 +26,15 @@ access key, in the Authorization header, for example
 `-H "Authorization: Bearer $AWS_SECRET_ACCESS_KEY"`. It is replaced with a real
 signature as the request leaves. Never compute an AWS signature yourself.
 
+An OAuth client works with placeholders too. If the user has set the client up in the
+application, send its client secret's placeholder as the bearer token to the service's
+API, for example `-H "Authorization: Bearer $EXAMPLE_CLIENT_SECRET"`, and an access
+token is supplied as the request leaves. If the service rejects that, request a token
+from its token endpoint yourself, with the client id and secret placeholders as Basic
+auth. The token comes back as a placeholder, which you use like any other. Signing in
+as the user through a browser is not available from this sandbox: if a request needs
+the user's own account, tell them so instead of starting a sign-in.
+
 The real values never reach you, and you never need them. Do not ask the user for a
 credential's value, and if one is pasted into the conversation do not use it; ask
 the user to put it in Doppler instead, where it will reach you as a placeholder.
