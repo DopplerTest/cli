@@ -23,11 +23,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/DopplerHQ/cli/pkg/configuration"
 	"github.com/DopplerHQ/cli/pkg/models"
@@ -314,7 +317,6 @@ var proxyStartCmd = &cobra.Command{
 		}
 
 		flagPassthrough, _ := cmd.Flags().GetStringSlice("passthrough")
-		passthrough := proxy.MergePassthrough(proxyConfig, flagPassthrough)
 		upstreamProxy, _ := cmd.Flags().GetString("upstream-proxy")
 		allowPrivateEgress, _ := cmd.Flags().GetBool("allow-private-egress")
 
@@ -331,7 +333,7 @@ var proxyStartCmd = &cobra.Command{
 			address:            address,
 			dataDir:            dataDir,
 			logOut:             io.MultiWriter(os.Stderr, logFile),
-			passthrough:        passthrough,
+			passthrough:        flagPassthrough,
 			upstreamProxy:      upstreamProxy,
 			proxyToken:         proxyToken,
 			allowPrivateEgress: allowPrivateEgress,
@@ -350,6 +352,25 @@ var proxyStartCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
+		// A change saved to the config while the proxy runs is put in force in place.
+		// Restarting the proxy instead would mint new masks, and an agent already
+		// running would hold masks the proxy no longer knows.
+		if reloader, ok := engine.(proxy.Reloader); ok {
+			reloadLog := log.New(opts.LogWriter, "", log.LstdFlags)
+			baseline := reloadBaseline{
+				configName:      configName,
+				flagPassthrough: flagPassthrough,
+				address:         address,
+				addressFromFlag: cmd.Flags().Changed("address"),
+				passByValue:     proxyConfig.PassByValue,
+			}
+			watcher := proxy.NewConfigWatcher(proxyConfigPath)
+			go watcher.Watch(ctx, configCheckInterval,
+				func(next *proxy.ProxyConfig) { reloadPolicy(reloader, next, baseline, reloadLog.Printf) },
+				func(err error) { reloadLog.Printf("agent-proxy: %s was not reloaded: %v", proxyConfigPath, err) },
+			)
+		}
+
 		utils.Log(fmt.Sprintf("Starting proxy engine %q on %s (press Ctrl-C to stop)", engineName, address))
 		utils.Log(fmt.Sprintf("Logs: %s", logPath))
 		if err := engine.Start(ctx); err != nil {
@@ -358,11 +379,57 @@ var proxyStartCmd = &cobra.Command{
 	},
 }
 
+// configCheckInterval is how often a running proxy looks for a saved config change.
+const configCheckInterval = 250 * time.Millisecond
+
+// reloadBaseline is what proxy start resolved once, which a reloaded config is read
+// against.
+type reloadBaseline struct {
+	configName      string
+	flagPassthrough []string
+	address         string
+	addressFromFlag bool
+	passByValue     []string
+}
+
+// reloadPolicy puts a saved config in force on the running proxy. A config that is
+// not valid leaves the running policy as it is and says why. The listen address and
+// the pass-by-value list cannot change under a running agent, since its environment
+// already names the one and carries the other, so a change to either is reported as
+// waiting for a restart.
+func reloadPolicy(r proxy.Reloader, next *proxy.ProxyConfig, base reloadBaseline, logf func(string, ...any)) {
+	if effective, applied := next.ResolveForConfig(base.configName); applied {
+		next = effective
+	}
+	if _, err := next.MissingBindingsMode(); err != nil {
+		logf("agent-proxy: the config was not reloaded: %v", err)
+		return
+	}
+	policy, err := proxy.PolicyFor(next, base.flagPassthrough)
+	if err != nil {
+		logf("agent-proxy: the config was not reloaded: %v", err)
+		return
+	}
+	r.Reload(policy)
+	if !base.addressFromFlag && next.ListenAddress != "" && next.ListenAddress != base.address {
+		logf("agent-proxy: listen_address is now %s; it takes effect when the proxy restarts", next.ListenAddress)
+	}
+	if !slices.Equal(sortedCopy(next.PassByValue), sortedCopy(base.passByValue)) {
+		logf("agent-proxy: pass_by_value changed; it takes effect when the proxy restarts")
+	}
+}
+
+func sortedCopy(names []string) []string {
+	out := slices.Clone(names)
+	slices.Sort(out)
+	return out
+}
+
 // proxyStartInputs are the resolved flags proxy start turns into engine options.
 type proxyStartInputs struct {
 	address, dataDir, upstreamProxy, proxyToken string
 	allowPrivateEgress                          bool
-	passthrough                                 []string
+	passthrough                                 []string // the --passthrough hosts, added to the config's
 	logOut                                      io.Writer
 	source                                      agentproxy.SecretSource
 }
@@ -370,11 +437,7 @@ type proxyStartInputs struct {
 // engineOptions is the one place config and flags become engine options, so a
 // test can assert each setting actually reaches the engine.
 func engineOptions(cfg *proxy.ProxyConfig, in proxyStartInputs) (proxy.Options, error) {
-	binding, err := cfg.BindingResolver()
-	if err != nil {
-		return proxy.Options{}, err
-	}
-	allowUpgrades, err := cfg.AllowProtocolUpgrades()
+	policy, err := proxy.PolicyFor(cfg, in.passthrough)
 	if err != nil {
 		return proxy.Options{}, err
 	}
@@ -387,13 +450,13 @@ func engineOptions(cfg *proxy.ProxyConfig, in proxyStartInputs) (proxy.Options, 
 		DataDir:               in.dataDir,
 		LogWriter:             in.logOut,
 		AgentEnvPath:          agentproxy.AgentEnvPath(in.dataDir),
-		PassthroughHosts:      in.passthrough,
+		PassthroughHosts:      policy.PassthroughHosts,
 		UpstreamProxy:         in.upstreamProxy,
 		ProxyAuthToken:        in.proxyToken,
-		Binding:               binding,
+		Binding:               policy.Binding,
 		AllowPrivateEgress:    in.allowPrivateEgress,
-		AllowProtocolUpgrades: allowUpgrades,
-		Methods:               cfg.MethodConfigs(),
+		AllowProtocolUpgrades: policy.AllowProtocolUpgrades,
+		Methods:               policy.Methods,
 		PassByValue:           cfg.PassByValue,
 	}, nil
 }

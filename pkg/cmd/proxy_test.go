@@ -9,8 +9,10 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	agentproxy "github.com/DopplerTest/agent-proxy"
@@ -83,5 +85,82 @@ func TestEngineOptionsCarryEverySetting(t *testing.T) {
 func TestEngineOptionsRejectUnknownUnboundPolicy(t *testing.T) {
 	if _, err := engineOptions(&proxy.ProxyConfig{Unbound: "maybe"}, proxyStartInputs{logOut: io.Discard, source: staticSource{}}); err == nil {
 		t.Fatal("an unknown unbound policy must be an error")
+	}
+}
+
+// recordingReloader stands in for the running engine.
+type recordingReloader struct{ policies []agentproxy.Policy }
+
+func (r *recordingReloader) Reload(p agentproxy.Policy) { r.policies = append(r.policies, p) }
+
+func collectLogs() (*[]string, func(string, ...any)) {
+	var lines []string
+	return &lines, func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+}
+
+// A saved config reaches the running proxy with the overrides for its Doppler config
+// applied, the same way proxy start read it.
+func TestReloadPolicyAppliesTheConfigsOverrides(t *testing.T) {
+	r := &recordingReloader{}
+	logs, logf := collectLogs()
+	next := &proxy.ProxyConfig{
+		Bindings: map[string][]agentproxy.Rule{"GH": {{Host: "api.github.com"}}},
+		ConfigOverrides: map[string]proxy.ConfigOverride{
+			"prd": {Bindings: map[string][]agentproxy.Rule{"GH": {{Host: "ghe.example.com"}}}},
+		},
+	}
+	reloadPolicy(r, next, reloadBaseline{configName: "prd"}, logf)
+	if len(r.policies) != 1 {
+		t.Fatalf("expected one reload, got %d (logs %v)", len(r.policies), *logs)
+	}
+	dest := func(host string) agentproxy.BindingRequest {
+		return agentproxy.BindingRequest{Name: "GH", Dest: agentproxy.Destination{Host: host}}
+	}
+	if ok, _ := r.policies[0].Binding.Allowed(dest("ghe.example.com")); !ok {
+		t.Fatal("the prd override should be in force")
+	}
+	if ok, _ := r.policies[0].Binding.Allowed(dest("api.github.com")); ok {
+		t.Fatal("the override replaces the base bindings")
+	}
+}
+
+// A config that is not valid leaves the running policy alone and says why.
+func TestReloadPolicyKeepsTheRunningPolicyOnAnInvalidConfig(t *testing.T) {
+	for _, next := range []*proxy.ProxyConfig{{Unbound: "maybe"}, {MissingBindings: "sometimes"}, {ProtocolUpgrades: "always"}} {
+		r := &recordingReloader{}
+		logs, logf := collectLogs()
+		reloadPolicy(r, next, reloadBaseline{}, logf)
+		if len(r.policies) != 0 {
+			t.Fatalf("an invalid config must not be reloaded: %+v", next)
+		}
+		if len(*logs) != 1 || !strings.Contains((*logs)[0], "was not reloaded") {
+			t.Fatalf("the refusal should be logged; got %v", *logs)
+		}
+	}
+}
+
+// The listen address and the pass-by-value list are in the running agent's
+// environment, so a change to either waits for a restart, and the log says so.
+func TestReloadPolicyReportsSettingsThatWaitForARestart(t *testing.T) {
+	r := &recordingReloader{}
+	logs, logf := collectLogs()
+	base := reloadBaseline{address: "0.0.0.0:14331", passByValue: []string{"B", "A"}}
+	reloadPolicy(r, &proxy.ProxyConfig{ListenAddress: "0.0.0.0:14331", PassByValue: []string{"A", "B"}}, base, logf)
+	if len(*logs) != 0 {
+		t.Fatalf("nothing changed that needs a restart; got %v", *logs)
+	}
+	reloadPolicy(r, &proxy.ProxyConfig{ListenAddress: "0.0.0.0:14400", PassByValue: []string{"A"}}, base, logf)
+	if len(r.policies) != 2 {
+		t.Fatalf("the reloadable settings should still be applied; got %d reloads", len(r.policies))
+	}
+	joined := strings.Join(*logs, "\n")
+	if !strings.Contains(joined, "listen_address is now 0.0.0.0:14400") || !strings.Contains(joined, "pass_by_value changed") {
+		t.Fatalf("both restart-only changes should be reported; got %v", *logs)
+	}
+	// An address given with --address is not the config's to change.
+	*logs = nil
+	reloadPolicy(r, &proxy.ProxyConfig{ListenAddress: "0.0.0.0:14400"}, reloadBaseline{address: "127.0.0.1:9", addressFromFlag: true}, logf)
+	if len(*logs) != 0 {
+		t.Fatalf("an address from the flag is not reported; got %v", *logs)
 	}
 }
