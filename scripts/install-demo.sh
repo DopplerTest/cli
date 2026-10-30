@@ -4,13 +4,13 @@
 # the production scripts/install.sh: no package managers, no GPG — just fetch the archive
 # for this OS/arch, verify its sha256, and drop `doppler-beta` on PATH.
 #
-#   curl -fsSL https://storage.googleapis.com/doppler-proxy-alpha/install.sh | sh
+#   curl -fsSL https://storage.googleapis.com/doppler-proxy-beta/install.sh | sh
 #
 # It installs `doppler-beta` (never `doppler`), so it can't collide with a production
 # Doppler CLI, and the binary keeps its state in ~/.doppler-beta.
 set -eu
 
-BUCKET="${DOPPLER_BETA_BUCKET:-doppler-proxy-alpha}"
+BUCKET="${DOPPLER_BETA_BUCKET:-doppler-proxy-beta}"
 # Base URL the artifacts are served from. Override to point at a mirror, a signed-URL
 # host, or a local server for testing; defaults to the public GCS bucket.
 BASE="${DOPPLER_BETA_BASE_URL:-https://storage.googleapis.com/${BUCKET}/doppler-beta}"
