@@ -72,5 +72,5 @@ changelog:
 # (a demo service-account key), the same mechanism the production release uses.
 blobs:
   - provider: gs
-    bucket: doppler-proxy-alpha
+    bucket: doppler-proxy-beta
     directory: "doppler-beta/{{ .Version }}"
