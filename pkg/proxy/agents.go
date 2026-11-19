@@ -29,9 +29,9 @@ import (
 )
 
 // AgentProfile is a named agent: the Doppler project and config it reads, the
-// command `agent run` starts, the host directories mounted into it, and the service
-// token minted for it. Its proxy config (bindings, passthrough, ...) lives beside it
-// as config.yaml, and its proxy state (CA, agent env, log) under proxy/.
+// command `agent run` starts, and the service token minted for it. Its proxy config
+// (bindings, passthrough, ...) lives beside it as config.yaml, and its proxy state
+// (CA, agent env, log) under proxy/.
 type AgentProfile struct {
 	Name    string   `yaml:"name" json:"name"`
 	Project string   `yaml:"project" json:"project"`
@@ -41,10 +41,9 @@ type AgentProfile struct {
 	// gemini, aider or other), kept apart from Command so a wrapper or alias in the command
 	// does not change which provider credential the agent is offered. Empty on agents
 	// created before the field existed; callers fall back to the command then.
-	Agent     string   `yaml:"agent,omitempty" json:"agent"`
-	Mounts    []string `yaml:"mounts" json:"mounts"`
-	TokenSlug string   `yaml:"token_slug,omitempty" json:"token_slug"`
-	TokenName string   `yaml:"token_name,omitempty" json:"token_name"`
+	Agent     string `yaml:"agent,omitempty" json:"agent"`
+	TokenSlug string `yaml:"token_slug,omitempty" json:"token_slug"`
+	TokenName string `yaml:"token_name,omitempty" json:"token_name"`
 	// TokenExpiresAt is the RFC3339 expiry the API reports for the service token,
 	// or "" when the token was minted without one.
 	TokenExpiresAt string `yaml:"token_expires_at,omitempty" json:"token_expires_at"`
@@ -193,30 +192,3 @@ func NextAgentPort(configDir string) int {
 // AgentHomeVolume names the Docker volume that keeps the agent's home directory
 // between runs, so a login done once inside the sandbox sticks.
 func AgentHomeVolume(name string) string { return "doppler-agent-" + name + "-home" }
-
-// ParseMount splits a mount spec of the form /host/path[:ro] and resolves the
-// host path to an absolute directory.
-func ParseMount(spec string) (hostPath string, readOnly bool, err error) {
-	spec = strings.TrimSpace(spec)
-	if strings.HasSuffix(spec, ":ro") {
-		readOnly = true
-		spec = strings.TrimSuffix(spec, ":ro")
-	} else {
-		spec = strings.TrimSuffix(spec, ":rw")
-	}
-	if spec == "" {
-		return "", false, errors.New("empty mount path")
-	}
-	abs, err := filepath.Abs(spec)
-	if err != nil {
-		return "", false, err
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", false, err
-	}
-	if !info.IsDir() {
-		return "", false, fmt.Errorf("%s is not a directory", abs)
-	}
-	return abs, readOnly, nil
-}

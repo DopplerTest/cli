@@ -8,7 +8,6 @@ you may not use this file except in compliance with the License.
 package proxy
 
 import (
-	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -26,32 +25,6 @@ func TestValidateAgentName(t *testing.T) {
 		if err := ValidateAgentName(n); err == nil {
 			t.Errorf("ValidateAgentName(%q) should be rejected", n)
 		}
-	}
-}
-
-func TestParseMount(t *testing.T) {
-	dir := t.TempDir()
-
-	host, ro, err := ParseMount(dir)
-	if err != nil || host != dir || ro {
-		t.Fatalf("ParseMount(%q) = (%q, %v, %v)", dir, host, ro, err)
-	}
-
-	host, ro, err = ParseMount(dir + ":ro")
-	if err != nil || host != dir || !ro {
-		t.Fatalf("ParseMount(:ro) = (%q, %v, %v)", host, ro, err)
-	}
-
-	if _, _, err := ParseMount(filepath.Join(dir, "does-not-exist")); err == nil {
-		t.Fatal("ParseMount of a missing path should error")
-	}
-
-	file := filepath.Join(dir, "afile")
-	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := ParseMount(file); err == nil {
-		t.Fatal("ParseMount of a file (not a directory) should error")
 	}
 }
 

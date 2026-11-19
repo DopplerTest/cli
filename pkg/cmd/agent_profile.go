@@ -137,7 +137,7 @@ func recordAgentWorkplace(configDir string, p *proxy.AgentProfile, lookup func()
 
 var agentCreateCmd = &cobra.Command{
 	Use:   "create <name>",
-	Short: "Create a named agent: a project and config, a service token minted for it, a command, and the directories it can see",
+	Short: "Create a named agent: a project and config, a service token minted for it, and a command",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
@@ -167,18 +167,6 @@ var agentCreateCmd = &cobra.Command{
 		if agentKind != "" && !proxy.IsKnownAgent(agentKind) {
 			utils.HandleError(fmt.Errorf("unknown --agent %q; use one of %s", agentKind, strings.Join(proxy.KnownAgents, ", ")))
 		}
-		mountFlags, _ := cmd.Flags().GetStringArray("mount")
-		var mounts []string
-		for _, m := range mountFlags {
-			host, ro, err := proxy.ParseMount(m)
-			if err != nil {
-				utils.HandleError(err, "invalid --mount")
-			}
-			if ro {
-				host += ":ro"
-			}
-			mounts = append(mounts, host)
-		}
 
 		hostname, _ := os.Hostname()
 		tokenName := fmt.Sprintf("agent-proxy %s (%s)", name, hostname)
@@ -197,7 +185,6 @@ var agentCreateCmd = &cobra.Command{
 			Config:         config,
 			Command:        strings.Fields(command),
 			Agent:          agentKind,
-			Mounts:         mounts,
 			TokenSlug:      minted.Slug,
 			TokenName:      minted.Name,
 			TokenExpiresAt: minted.ExpiresAt,
@@ -436,7 +423,6 @@ func init() {
 	agentCreateCmd.Flags().StringP("config", "c", "", "Doppler config the agent reads")
 	agentCreateCmd.Flags().String("command", "claude", "command that agent run starts when none is given after --")
 	agentCreateCmd.Flags().String("agent", "", "the agent family the command runs (claude, codex, gemini, aider or other); decides the provider hosts and credential, defaults to the command's program")
-	agentCreateCmd.Flags().StringArray("mount", nil, "host directory mounted at /workspace/<basename>; repeat for more, append :ro for read-only")
 	agentCreateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentRotateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentDeleteCmd.Flags().Bool("keep-token", false, "leave the service token in place")
