@@ -17,7 +17,6 @@ limitations under the License.
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +30,6 @@ import (
 	"github.com/DopplerHQ/cli/pkg/proxy"
 	"github.com/DopplerHQ/cli/pkg/utils"
 	agentproxy "github.com/DopplerTest/agent-proxy"
-	"github.com/DopplerTest/agent-proxy/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -295,19 +293,8 @@ var agentDeleteCmd = &cobra.Command{
 		if err := os.RemoveAll(agentDir); err != nil {
 			utils.HandleError(err, "unable to remove the agent directory")
 		}
-		// The home volume can hold the agent's own provider login, and its name is
-		// derived from the agent name, so a later agent of the same name would
-		// silently reuse it. If removal fails (a sandbox is still running, or a different
-		// container CLI), warn with the manual cleanup rather than leaving it a silent orphan.
-		dockerBin, _ := cmd.Flags().GetString("docker")
-		volume := proxy.AgentHomeVolume(name)
-		homeVolumeRemoved := true
-		if rmErr := sandbox.RemoveHomeVolume(context.Background(), dockerBin, volume); rmErr != nil {
-			homeVolumeRemoved = false
-			utils.PrintWarning(fmt.Sprintf("Removed the agent, but its home volume %q may remain (it can hold the agent's login). Remove it with `%s volume rm %s`.", volume, dockerBin, volume))
-		}
 		if utils.OutputJSON {
-			printJSON(map[string]any{"deleted": name, "token_revoked": !keepToken && p.TokenSlug != "", "home_volume_removed": homeVolumeRemoved})
+			printJSON(map[string]any{"deleted": name, "token_revoked": !keepToken && p.TokenSlug != ""})
 			return
 		}
 		utils.Log("Deleted agent " + name)
@@ -411,7 +398,6 @@ func init() {
 	agentCreateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentRotateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentDeleteCmd.Flags().Bool("keep-token", false, "leave the service token in place")
-	agentDeleteCmd.Flags().String("docker", "docker", "container CLI used to remove the agent's home volume (docker, podman, ...)")
 	agentCmd.AddCommand(agentCreateCmd)
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentShowCmd)

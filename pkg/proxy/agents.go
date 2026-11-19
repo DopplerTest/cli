@@ -188,7 +188,3 @@ func NextAgentPort(configDir string) int {
 	}
 	return port
 }
-
-// AgentHomeVolume names the Docker volume that keeps the agent's home directory
-// between runs, so a login done once inside the sandbox sticks.
-func AgentHomeVolume(name string) string { return "doppler-agent-" + name + "-home" }

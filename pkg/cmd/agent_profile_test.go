@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"testing"
 
@@ -146,6 +147,20 @@ func TestBackfillWorkplacesRecordsFromEachAgentsOwnToken(t *testing.T) {
 	// Only the agents that have a token and no workplace are looked up, each with its own token.
 	if len(looked) != 2 || (looked[0] != "dp.st.other" && looked[1] != "dp.st.other") || (looked[0] != "dp.st.gone" && looked[1] != "dp.st.gone") {
 		t.Fatalf("looked up %v, want the legacy and failing tokens only", looked)
+	}
+}
+
+// The desktop app reads this output, so it is pinned whole: the two fields and no
+// warning beside them.
+func TestAgentDeleteRemovesTheAgentAndPrintsTheResult(t *testing.T) {
+	configDir, _ := seedAgent(t)
+
+	output, code := runAgentCommand(t, configDir, "delete", "demo", "--keep-token", "--json")
+	if want := `{"deleted":"demo","token_revoked":false}` + "\n"; code != 0 || output != want {
+		t.Fatalf("exit code = %d, output = %q, want 0 and %q", code, output, want)
+	}
+	if _, err := os.Stat(proxy.AgentDir(configDir, "demo")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the agent's directory should be gone, Stat returned %v", err)
 	}
 }
 

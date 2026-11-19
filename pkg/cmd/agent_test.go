@@ -605,7 +605,7 @@ func TestAgentDeleteNamesTheCAItCouldNotRemoveByItsHash(t *testing.T) {
 			t.Setenv(keychainEnv, tc.keychain)
 
 			// true stands in for docker, which agent delete runs to remove a home volume.
-			output, code := runAgentCommand(t, configDir, "delete", "demo", "--keep-token", "--docker", "true")
+			output, code := runAgentCommand(t, configDir, "delete", "demo", "--keep-token")
 			for _, want := range []string{"The agent's CA may still be a trusted root in your login keychain (" + tc.says, "SHA-256 hash: " + hash, "Deleted agent demo"} {
 				if !strings.Contains(output, want) {
 					t.Errorf("output = %q, want it to contain %q", output, want)
