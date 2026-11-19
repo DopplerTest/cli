@@ -226,7 +226,7 @@ var proxyStartCmd = &cobra.Command{
 		if logPath == "" {
 			logPath = filepath.Join(dataDir, "proxy.log")
 		}
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		logFile, err := proxy.OpenProxyLog(logPath)
 		if err != nil {
 			utils.HandleError(err, "unable to open proxy log file")
 		}

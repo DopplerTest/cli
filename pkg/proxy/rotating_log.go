@@ -19,6 +19,7 @@ package proxy
 import (
 	"errors"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -48,6 +49,18 @@ type RotatingLog struct {
 	// rotateAt is maxBytes, or further on while the file cannot be moved, so the
 	// move is not tried again on every write.
 	rotateAt int64
+}
+
+// OpenProxyLog opens the proxy's log at path and marks where this run begins. The
+// file holds earlier runs, and a run's first lines vary with what the engine logs
+// while it starts.
+func OpenProxyLog(path string) (*RotatingLog, error) {
+	l, err := OpenRotatingLog(path, logMaxBytes, logKeep)
+	if err != nil {
+		return nil, err
+	}
+	log.New(l, "", log.LstdFlags).Printf("agent-proxy: proxy start, pid %d", os.Getpid())
+	return l, nil
 }
 
 // OpenRotatingLog opens path for appending, creating it if needed. A path that is

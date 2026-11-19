@@ -339,6 +339,29 @@ func TestRotatingLogRotatesAtTheLimitAfterAnOlderFileCouldNotMove(t *testing.T) 
 	}
 }
 
+func TestOpenProxyLogMarksEachStart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "proxy.log")
+	first, err := OpenProxyLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeLog(t, first, "first run\n")
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := OpenProxyLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+
+	lines := strings.Split(strings.TrimSuffix(readLog(t, path), "\n"), "\n")
+	marker := fmt.Sprintf("agent-proxy: proxy start, pid %d", os.Getpid())
+	if len(lines) != 3 || !strings.HasSuffix(lines[0], marker) || lines[1] != "first run" || !strings.HasSuffix(lines[2], marker) {
+		t.Fatalf("each start should add its own line after the earlier run; got %q", lines)
+	}
+}
+
 func TestRotatingLogWithNoKeepDropsTheRotatedFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "proxy.log")
 	l := openLog(t, path, 10, 0)
