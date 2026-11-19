@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func TestProviderHostsByProgram(t *testing.T) {
 	if got := ProviderHosts([]string{"/usr/local/bin/codex"}); len(got) == 0 || got[0] != "api.openai.com" {
 		t.Fatalf("codex should resolve by basename to OpenAI hosts, got %v", got)
 	}
-	if got := ProviderHosts([]string{"gemini"}); len(got) == 0 || !contains(got, "generativelanguage.googleapis.com") {
+	if got := ProviderHosts([]string{"gemini"}); len(got) == 0 || !slices.Contains(got, "generativelanguage.googleapis.com") {
 		t.Fatalf("gemini: %v", got)
 	}
 	// Anything the app does not know gets no provider hosts: the user adds them, or saving
