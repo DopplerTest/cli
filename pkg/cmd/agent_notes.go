@@ -27,12 +27,15 @@ import (
 
 var agentNotesCmd = &cobra.Command{
 	Use:   "notes <agent>",
-	Short: "Print the sandbox notes the agent is handed at the start of each run",
-	Long: `Print the notes the agent is handed at the start of each run.
+	Short: "Print the notes for the agent",
+	Long: `Print the notes for the agent.
 
 They are rendered from the agent's current proxy config, so this shows exactly what the
-agent will be told: what a placeholder is, where each secret may be used, what to do when
-a request is refused, and where files persist. Nothing in them helps an agent misbehave.`,
+agent is told: what a placeholder is, where each secret may be used, and what to do when
+a request is refused. Nothing in them helps an agent misbehave.
+
+` + "`agent run`" + ` passes them to Claude Code when it starts. No other agent is given
+them, so add them to that agent's own instructions.`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		p, err := proxy.LoadAgent(configuration.UserConfigDir, args[0])

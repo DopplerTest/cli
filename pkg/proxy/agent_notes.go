@@ -24,16 +24,18 @@ import (
 	"strings"
 )
 
-// The notes the agent is handed at the start of every run live in agent_notes.md so
-// the prose is reviewed as prose. They say enough to do real work accurately, and
-// nothing that helps an agent misbehave: what a placeholder is and how to use one,
-// which destination each secret may reach, what a refusal looks like and the one
-// correct response to it, and where files persist.
+// The notes the agent is given at the start of a run live in agent_notes.md so the
+// prose is reviewed as prose. They say enough to do real work accurately, and nothing
+// that helps an agent misbehave: what a placeholder is and how to use one, which
+// destination each secret may reach, and what a refusal looks like and the one correct
+// response to it.
 //
 // Deliberately absent: the passthrough list (the hosts the proxy does not inspect are a
 // map to the exit), how injection or scrubbing work, the proxy address or credential,
-// and any vocabulary of ways around the sandbox. The firewall enforces those; the notes
-// should not advertise them. TestAgentNotesNeverHelpAnAgentMisbehave holds that line.
+// where the proxy keeps its files, and any vocabulary of ways around the proxy. On the
+// user's machine nothing stops a request that skips the proxy, and only the
+// placeholders keep a real value from the agent, so the notes must not suggest one.
+// TestAgentNotesNeverHelpAnAgentMisbehave holds that line.
 //
 //go:embed agent_notes.md
 var agentNotesTemplate string

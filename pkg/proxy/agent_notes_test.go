@@ -29,32 +29,39 @@ func notesFixture() *ProxyConfig {
 	}
 }
 
+// notesText renders the notes as one line, so where the prose wraps does not decide
+// what a test finds in it.
+func notesText(cfg *ProxyConfig) string {
+	return strings.Join(strings.Fields(RenderAgentNotes(cfg)), " ")
+}
+
 func TestAgentNotesSayWhatTheAgentNeeds(t *testing.T) {
-	n := RenderAgentNotes(notesFixture())
+	n := notesText(notesFixture())
 	for _, want := range []string{
 		"dp.mask.",                 // what a placeholder looks like
 		"exactly as you find them", // how to use one
-		"GITHUB_TOKEN: api.github.com, uploads.github.com", // allowed destinations, hosts joined
+		"do not put one in a URL, query string, or request body", // where one is refused
+		"GITHUB_TOKEN: api.github.com, uploads.github.com",       // allowed destinations, hosts joined
 		"STRIPE_KEY: api.stripe.com",
 		"Any other secret",                                         // the rest have no destination yet
 		"Doppler agent-proxy refused",                              // how a refusal looks
 		"Tell the user",                                            // the correct response to one
 		"The AWS CLI and SDKs show",                                // a 403 with no body is the same refusal
 		"waiting for them to approve",                              // what to say while the user decides
+		"try the request again",                                    // once the user has approved
 		"set the policy for secrets with no binding to \"Ask me\"", // the remedy when nobody is asked
-		"pip install --user",                                       // how to get tools without root
-		"ask the user for permission",                              // before installing one
-		"fall back to plain curl",                                  // when a tool cannot be installed
-		"do the task the way you would anywhere else",              // the sandbox is not the job
+		"do the task the way you would anywhere else",              // the proxy is not the job
+		"Do not ask the user for a credential's value",             // the agent never needs a real one
 		"do not use it",                                            // a credential pasted into the conversation
 		"a refusal is the user's decision",                         // never route around one
 		"AWS requests are signed for you",                          // so the agent never signs one itself
 		"either AWS key",                                           // a one-off call works with either half
 		"Never compute an AWS signature yourself",                  // the placeholders cannot sign anyway
-		"gh auth setup-git",                                        // git over HTTPS with the GitHub credential
-		"read-only",                                                // a mount the user chose to protect
-		"/home/agent",                                              // what persists
-		"/workspace/",
+		"client secret's placeholder",                              // an OAuth client's token is supplied
+		"WebSocket",                                                // refused unless the user allowed it
+		"HTTPS remotes",                                            // a placeholder does not work with git over SSH
+		"git -c credential.helper= -c credential.helper='!f()",     // git over HTTPS with the token, for one command
+		"whichever variable holds the token",                       // the example names one variable only
 	} {
 		if !strings.Contains(n, want) {
 			t.Errorf("notes should contain %q\n%s", want, n)
@@ -68,7 +75,7 @@ func TestAgentNotesSayWhatTheAgentNeeds(t *testing.T) {
 
 func TestAgentNotesNeverHelpAnAgentMisbehave(t *testing.T) {
 	cfg := notesFixture()
-	n := strings.ToLower(RenderAgentNotes(cfg))
+	n := strings.ToLower(notesText(cfg))
 	// Blind-tunneled hosts are the one route the proxy does not inspect; naming them
 	// would be a map to the exit. Mechanism details and evasion vocabulary likewise.
 	for _, host := range cfg.Passthrough {
@@ -76,7 +83,43 @@ func TestAgentNotesNeverHelpAnAgentMisbehave(t *testing.T) {
 			t.Errorf("notes must not name the passthrough host %q", host)
 		}
 	}
-	for _, banned := range []string{"passthrough", "tunnel", "inspect", "config.yaml", "dns", "port ", "ip address", "header-only", "scrub", "http_proxy", "https_proxy"} {
+	// The agent runs on the user's machine, where a request can skip the proxy and the
+	// proxy's own files are readable. The notes say neither how nor where.
+	for _, banned := range []string{"passthrough", "tunnel", "inspect", "config.yaml", "dns", "port ", "ip address", "header-only", "scrub", "http_proxy", "https_proxy", "no_proxy", "bypass", ".doppler"} {
+		if strings.Contains(n, banned) {
+			t.Errorf("notes must not mention %q", banned)
+		}
+	}
+}
+
+// The agent runs on the user's machine, so nothing the sandbox used to give it is
+// described: no home volume, no mounted directories, no missing root.
+func TestAgentNotesDoNotDescribeASandbox(t *testing.T) {
+	n := strings.ToLower(notesText(notesFixture()))
+	for _, gone := range []string{"sandbox", "container", "docker", "/workspace", "/home/agent", "mounted", "without root", "browser"} {
+		if strings.Contains(n, gone) {
+			t.Errorf("notes must not mention %q", gone)
+		}
+	}
+}
+
+// The agent shares the user's home. A placeholder saved in a config file, or a login
+// command that changes git's credential helper, would reach every shell outside the run.
+func TestAgentNotesKeepPlaceholdersOutOfTheUsersFiles(t *testing.T) {
+	n := notesText(notesFixture())
+	for _, want := range []string{
+		"on the command line of the one command that needs it",
+		"Do not save a placeholder into a config file",
+		"do not run a login or setup command that stores one",
+		"Those files belong to the user and are read outside this session",
+		"git does not read from, or save into, a credential store the user has set up",
+		"Nothing is saved this way",
+	} {
+		if !strings.Contains(n, want) {
+			t.Errorf("notes should contain %q\n%s", want, n)
+		}
+	}
+	for _, banned := range []string{"setup-git", "in a tool's config file", "in its login command", "--global"} {
 		if strings.Contains(n, banned) {
 			t.Errorf("notes must not mention %q", banned)
 		}
@@ -84,7 +127,7 @@ func TestAgentNotesNeverHelpAnAgentMisbehave(t *testing.T) {
 }
 
 func TestAgentNotesWithNoBindings(t *testing.T) {
-	n := RenderAgentNotes(&ProxyConfig{Passthrough: []string{"api.anthropic.com"}})
+	n := notesText(&ProxyConfig{Passthrough: []string{"api.anthropic.com"}})
 	if !strings.Contains(n, "No secret has an allowed destination yet") {
 		t.Fatalf("empty bindings should be stated plainly:\n%s", n)
 	}
