@@ -9,6 +9,9 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/DopplerHQ/cli/pkg/models"
@@ -68,6 +71,28 @@ func TestRecordAgentWorkplaceLeavesTheProfileAloneWhenTheLookupFails(t *testing.
 		if got, _ := proxy.LoadAgent(dir, "old"); got.WorkplaceSlug != "" || p.WorkplaceSlug != "" {
 			t.Fatalf("a failed lookup must leave the workplace empty; got %q", got.WorkplaceSlug)
 		}
+	}
+}
+
+// A new agent's proxy accepts connections from this machine only.
+func TestAgentCreateSetsALoopbackListenAddress(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v3/configs/config/tokens" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"token":{"name":"agent-proxy demo","key":"dp.st.new","slug":"new-slug"}}`)
+	}))
+	t.Cleanup(api.Close)
+	configDir := t.TempDir()
+
+	output, code := runAgentCommand(t, configDir, "create", "demo", "--project", "proj", "--config", "dev", "--token", "dp.pt.test", "--api-host", api.URL)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0. Output:\n%s", code, output)
+	}
+	want := fmt.Sprintf("127.0.0.1:%d", proxy.DefaultAgentPort)
+	if got := proxy.ReadListenAddress(proxy.AgentConfigPath(proxy.AgentDir(configDir, "demo"))); got != want {
+		t.Fatalf("listen_address = %q, want %q", got, want)
 	}
 }
 

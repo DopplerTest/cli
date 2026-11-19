@@ -163,23 +163,31 @@ func TestReloadPolicyKeepsTheRunningPolicyOnAnInvalidConfig(t *testing.T) {
 func TestReloadPolicyReportsSettingsThatWaitForARestart(t *testing.T) {
 	r := &recordingReloader{}
 	logs, logf := collectLogs()
-	base := reloadBaseline{address: "0.0.0.0:14331", passByValue: []string{"B", "A"}}
-	reloadPolicy(r, &proxy.ProxyConfig{ListenAddress: "0.0.0.0:14331", PassByValue: []string{"A", "B"}}, base, logf)
+	base := reloadBaseline{address: "127.0.0.1:14331", passByValue: []string{"B", "A"}}
+	reloadPolicy(r, &proxy.ProxyConfig{ListenAddress: "127.0.0.1:14331", PassByValue: []string{"A", "B"}}, base, logf)
 	if len(*logs) != 0 {
 		t.Fatalf("nothing changed that needs a restart; got %v", *logs)
 	}
-	reloadPolicy(r, &proxy.ProxyConfig{ListenAddress: "0.0.0.0:14400", PassByValue: []string{"A"}}, base, logf)
+	reloadPolicy(r, &proxy.ProxyConfig{ListenAddress: "127.0.0.1:14400", PassByValue: []string{"A"}}, base, logf)
 	if len(r.policies) != 2 {
 		t.Fatalf("the reloadable settings should still be applied; got %d reloads", len(r.policies))
 	}
 	joined := strings.Join(*logs, "\n")
-	if !strings.Contains(joined, "listen_address is now 0.0.0.0:14400") || !strings.Contains(joined, "pass_by_value changed") {
+	if !strings.Contains(joined, "listen_address is now 127.0.0.1:14400") || !strings.Contains(joined, "pass_by_value changed") {
 		t.Fatalf("both restart-only changes should be reported; got %v", *logs)
 	}
 	// An address given with --address is not the config's to change.
 	*logs = nil
-	reloadPolicy(r, &proxy.ProxyConfig{ListenAddress: "0.0.0.0:14400"}, reloadBaseline{address: "127.0.0.1:9", addressFromFlag: true}, logf)
+	reloadPolicy(r, &proxy.ProxyConfig{ListenAddress: "127.0.0.1:14400"}, reloadBaseline{address: "127.0.0.1:9", addressFromFlag: true}, logf)
 	if len(*logs) != 0 {
 		t.Fatalf("an address from the flag is not reported; got %v", *logs)
+	}
+}
+
+// A plain proxy start accepts connections from this machine only. A wider bind has to
+// be asked for with --address or listen_address.
+func TestProxyStartListensOnLoopbackByDefault(t *testing.T) {
+	if got := proxyStartCmd.Flags().Lookup("address").DefValue; got != "127.0.0.1:14322" {
+		t.Fatalf("--address default = %q, want 127.0.0.1:14322", got)
 	}
 }

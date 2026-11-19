@@ -219,7 +219,7 @@ var agentCreateCmd = &cobra.Command{
 		if _, _, err := proxy.LoadOrScaffoldWith(proxy.AgentConfigPath(dir), proxy.ProviderHostsFor(p.Agent, p.Command)); err != nil {
 			utils.HandleError(err, "unable to scaffold the agent's proxy config")
 		}
-		if err := proxy.SetListenAddress(proxy.AgentConfigPath(dir), fmt.Sprintf("0.0.0.0:%d", port)); err != nil {
+		if err := proxy.SetListenAddress(proxy.AgentConfigPath(dir), fmt.Sprintf("127.0.0.1:%d", port)); err != nil {
 			utils.HandleError(err, "unable to set the agent's listen address")
 		}
 

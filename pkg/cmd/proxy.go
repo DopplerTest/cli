@@ -309,9 +309,8 @@ var proxyStartCmd = &cobra.Command{
 
 		// Address precedence: --address flag (if explicitly set) > config
 		// listen_address > the flag's built-in default. The scaffolded default is
-		// 0.0.0.0, which serves both host tools and the sandbox container; the
-		// per-run proxy token (below) is what keeps a broad bind from being an open
-		// proxy.
+		// loopback. A config or flag may still bind a wider address, and the per-run
+		// proxy token (below) is what keeps that from being an open proxy.
 		if !cmd.Flags().Changed("address") && proxyConfig.ListenAddress != "" {
 			address = proxyConfig.ListenAddress
 		}
@@ -479,7 +478,7 @@ func engineOptions(cfg *proxy.ProxyConfig, in proxyStartInputs) (proxy.Options, 
 func init() {
 	proxyStartCmd.Flags().String("engine", "masked-hash", "proxy engine to run")
 	proxyStartCmd.Flags().String("agent", "", "run the proxy for a named agent: its service token, project, config, proxy config and state")
-	proxyStartCmd.Flags().String("address", "0.0.0.0:14322", "address the proxy listens on; serves host + sandbox (set 127.0.0.1 for loopback-only, no sandbox). Overrides listen_address in the proxy config")
+	proxyStartCmd.Flags().String("address", "127.0.0.1:14322", "address the proxy listens on. Overrides listen_address in the proxy config")
 	proxyStartCmd.Flags().String("log-file", "", "write proxy logs to this file (default <data-dir>/proxy.log)")
 	proxyStartCmd.Flags().String("proxy-config", "", "path to the proxy YAML config (default <data-dir>/<scope>/config.yaml, scaffolded on first run)")
 	proxyStartCmd.Flags().StringSlice("passthrough", nil, "extra hostnames to blind-tunnel, appended to the config's passthrough list")

@@ -142,8 +142,8 @@ func TestLoadOrScaffold(t *testing.T) {
 	if !slices.Contains(cfg.Passthrough, "api.anthropic.com") {
 		t.Fatalf("starter config missing api.anthropic.com; got %v", cfg.Passthrough)
 	}
-	if cfg.ListenAddress != "0.0.0.0:14322" {
-		t.Fatalf("starter config listen_address = %q, want 0.0.0.0:14322", cfg.ListenAddress)
+	if cfg.ListenAddress != "127.0.0.1:14322" {
+		t.Fatalf("starter config listen_address = %q, want 127.0.0.1:14322", cfg.ListenAddress)
 	}
 
 	// A second load reads the existing file — not scaffolded again.
@@ -377,7 +377,7 @@ func TestStarterConfigStatesDefaultsExplicitly(t *testing.T) {
 	if cfg.MissingBindings != "warn" {
 		t.Errorf("missing_bindings = %q, want warn", cfg.MissingBindings)
 	}
-	if cfg.ListenAddress != "0.0.0.0:14322" {
+	if cfg.ListenAddress != "127.0.0.1:14322" {
 		t.Errorf("listen_address = %q", cfg.ListenAddress)
 	}
 }

@@ -32,7 +32,7 @@ import (
 // ProxyConfig is the user-editable proxy configuration (config.yaml).
 type ProxyConfig struct {
 	// ListenAddress is the address the proxy binds. Defaults (via the starter
-	// config) to 0.0.0.0:14322 so the `doppler agent run` sandbox can reach it.
+	// config) to 127.0.0.1:14322, since the agent runs on the same machine.
 	// The --address flag overrides this.
 	ListenAddress string `yaml:"listen_address"`
 
@@ -219,8 +219,8 @@ func (c *ProxyConfig) MethodConfigs() map[string]agentproxy.MethodConfig {
 // the list stays current instead of freezing at whatever existed on the first run.
 const starterTemplate = `# Doppler agent credential proxy.
 
-# 0.0.0.0 also serves the ` + "`agent run`" + ` sandbox. 127.0.0.1 is loopback only.
-listen_address: 0.0.0.0:14322
+# 127.0.0.1 accepts connections from this machine only.
+listen_address: 127.0.0.1:14322
 
 # Hosts tunnelled without interception: the agent's own provider.
 {{passthrough}}
