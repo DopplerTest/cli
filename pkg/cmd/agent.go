@@ -163,7 +163,7 @@ with the current directory mounted.`,
 		if agent != nil {
 			agentDir = proxy.AgentDir(configuration.UserConfigDir, agent.Name)
 		}
-		envNames := proxy.ExportAgentEnv(proxy.SandboxDefaults)
+		envNames := proxy.ExportAgentEnv(proxy.RunDefaults)
 		if agent != nil {
 			cfg, _, err := proxy.LoadOrScaffold(proxy.AgentConfigPath(agentDir))
 			if err != nil {
@@ -179,7 +179,7 @@ with the current directory mounted.`,
 				utils.HandleError(err, "unable to read the shared environment")
 			}
 			userEnv := proxy.MergeAgentEnv(localEnv, proxy.SharedEnvFor(agent.Agent, sharedEnv))
-			defaults := proxy.MergeAgentEnv(proxy.AWSRegionEnv(scope, userEnv), proxy.SandboxDefaults)
+			defaults := proxy.MergeAgentEnv(proxy.AWSRegionEnv(scope, userEnv), proxy.RunDefaults)
 			envNames = proxy.ExportAgentEnv(proxy.MergeAgentEnv(userEnv, defaults))
 			// The sandbox notes ride in the same way: exported here, named to docker, so
 			// the text never appears in the command line.
