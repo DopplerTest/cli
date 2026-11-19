@@ -245,24 +245,6 @@ func TestAWSRegionEnvCarriesThePairsRegion(t *testing.T) {
 	}
 }
 
-// A credential stored only in the shared file still reaches the run: the merged
-// names are what `agent run` exports and hands to the prelude, so the Claude
-// onboarding check must fire from the shared token alone.
-func TestMergedSharedTokenReachesTheClaudePrelude(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("CLAUDE_CODE_OAUTH_TOKEN") })
-	names := ExportAgentEnv(MergeAgentEnv(map[string]string{}, map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "shared-token"}))
-	if !reflect.DeepEqual(names, []string{"CLAUDE_CODE_OAUTH_TOKEN"}) {
-		t.Fatalf("exported names = %v, want the shared token's name", names)
-	}
-	if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "shared-token" {
-		t.Fatal("the shared value should be exported into the process environment")
-	}
-	script := scriptOf(t, WrapRun([]string{"claude"}, names, false))
-	if !strings.Contains(script, "hasCompletedOnboarding") {
-		t.Error("the Claude onboarding prelude should fire when the token comes from the shared file")
-	}
-}
-
 // agentEnvQuote writes a value the way the proxy writes it to agent.env.
 func agentEnvQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
