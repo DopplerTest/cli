@@ -8,6 +8,11 @@ you may not use this file except in compliance with the License.
 package proxy
 
 import (
+	"errors"
+	"os"
+	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -85,5 +90,114 @@ func TestAgentNotesWithNoBindings(t *testing.T) {
 	}
 	if strings.Contains(n, "anthropic") {
 		t.Fatal("still must not name passthrough hosts")
+	}
+}
+
+func TestCommandWithNotesGivesClaudeCodeTheNotesAsOneArgument(t *testing.T) {
+	notes := "line one\nline two with 'quotes' and $VARS"
+	for _, tc := range []struct{ command, want []string }{
+		{[]string{"claude"}, []string{"claude", "--append-system-prompt", notes}},
+		{[]string{"/opt/homebrew/bin/claude", "--model", "opus"}, []string{"/opt/homebrew/bin/claude", "--append-system-prompt", notes, "--model", "opus"}},
+		// Claude Code refuses the flag after a subcommand, so it goes before one.
+		{[]string{"claude", "mcp", "list"}, []string{"claude", "--append-system-prompt", notes, "mcp", "list"}},
+	} {
+		given := slices.Clone(tc.command)
+		if got, files, err := CommandWithNotes(tc.command, notes, "/data", nil); err != nil || files != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("CommandWithNotes(%q) = %q, %v, %v, want %q and no file to write", tc.command, got, files, err, tc.want)
+		}
+		if !reflect.DeepEqual(tc.command, given) {
+			t.Errorf("the command passed in was changed to %q", tc.command)
+		}
+	}
+}
+
+// The user's own text comes first, then a blank line, then the notes, all in the one
+// argument the command already has.
+func TestCommandWithNotesAddsTheNotesToTheTextTheUserAlreadyGives(t *testing.T) {
+	for _, tc := range []struct{ command, want []string }{
+		{[]string{"claude", "--append-system-prompt", "the user's own"}, []string{"claude", "--append-system-prompt", "the user's own\n\nnotes"}},
+		{[]string{"claude", "--append-system-prompt=the user's own"}, []string{"claude", "--append-system-prompt=the user's own\n\nnotes"}},
+		{[]string{"claude", "--model", "opus", "--append-system-prompt", "the user's own", "-p", "task"}, []string{"claude", "--model", "opus", "--append-system-prompt", "the user's own\n\nnotes", "-p", "task"}},
+	} {
+		given := slices.Clone(tc.command)
+		if got, files, err := CommandWithNotes(tc.command, "notes", "/data", nil); err != nil || files != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("CommandWithNotes(%q) = %q, %v, %v, want %q and no file to write", tc.command, got, files, err, tc.want)
+		}
+		if !reflect.DeepEqual(tc.command, given) {
+			t.Errorf("the command passed in was changed to %q", tc.command)
+		}
+	}
+}
+
+// Claude Code refuses --append-system-prompt together with --append-system-prompt-file,
+// so a command that names a file gets no second flag. The file it names is replaced by
+// one for the run to write: the user's own text, a blank line, then the notes.
+func TestCommandWithNotesAddsTheNotesToTheFileOfTextTheUserAlreadyNames(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		if path != "/mine/prompt.md" {
+			return nil, os.ErrNotExist
+		}
+		return []byte("the user's own\n"), nil
+	}
+	for _, tc := range []struct {
+		command []string
+		want    func(file string) []string
+	}{
+		{[]string{"claude", "--append-system-prompt-file", "/mine/prompt.md"}, func(file string) []string { return []string{"claude", "--append-system-prompt-file", file} }},
+		{[]string{"claude", "--append-system-prompt-file=/mine/prompt.md"}, func(file string) []string { return []string{"claude", "--append-system-prompt-file=" + file} }},
+		{[]string{"claude", "--model", "opus", "--append-system-prompt-file", "/mine/prompt.md", "-p", "task"}, func(file string) []string {
+			return []string{"claude", "--model", "opus", "--append-system-prompt-file", file, "-p", "task"}
+		}},
+	} {
+		given := slices.Clone(tc.command)
+		got, files, err := CommandWithNotes(tc.command, "notes", "/data", readFile)
+		if err != nil || len(files) != 1 {
+			t.Fatalf("CommandWithNotes(%q) = %q, %v, %v, want one file to write", tc.command, got, files, err)
+		}
+		if !regexp.MustCompile(`^/data/append-system-prompt-[0-9a-f]{12}\.md$`).MatchString(files[0].Path) {
+			t.Errorf("the file is written to %q, want a file of /data with a hash in its name", files[0].Path)
+		}
+		if want := "the user's own\n\nnotes"; string(files[0].Content) != want {
+			t.Errorf("the file holds %q, want %q", files[0].Content, want)
+		}
+		if want := tc.want(files[0].Path); !reflect.DeepEqual(got, want) {
+			t.Errorf("CommandWithNotes(%q) = %q, want %q", tc.command, got, want)
+		}
+		if !reflect.DeepEqual(tc.command, given) {
+			t.Errorf("the command passed in was changed to %q", tc.command)
+		}
+	}
+}
+
+// Without the user's text there is nothing right to put in the file, and a second flag
+// would have Claude Code refuse the command. So the command stays as the user wrote it.
+func TestCommandWithNotesLeavesACommandWhoseFileOfTextCannotBeReadAlone(t *testing.T) {
+	unreadable := func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	command := []string{"claude", "--append-system-prompt-file", "/mine/gone.md", "-p", "task"}
+
+	got, files, err := CommandWithNotes(command, "notes", "/data", unreadable)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("err = %v, want the error of the read", err)
+	}
+	if files != nil || !reflect.DeepEqual(got, command) {
+		t.Errorf("CommandWithNotes(%q) = %q, %v, want it unchanged and no file to write", command, got, files)
+	}
+}
+
+func TestCommandWithNotesLeavesEveryOtherCommandAlone(t *testing.T) {
+	for _, command := range [][]string{
+		{"codex"},
+		{"gemini", "--resume"},
+		{"aider"},
+		{"sh", "-c", "claude"},
+		{"claude-wrapper"},
+		nil,
+	} {
+		if got, files, err := CommandWithNotes(command, "notes", "/data", nil); err != nil || files != nil || !reflect.DeepEqual(got, command) {
+			t.Errorf("CommandWithNotes(%q) = %q, %v, %v, want it unchanged", command, got, files, err)
+		}
+	}
+	if got, files, err := CommandWithNotes([]string{"claude"}, "", "/data", nil); err != nil || files != nil || !reflect.DeepEqual(got, []string{"claude"}) {
+		t.Errorf("with no notes the command should be unchanged, got %q, %v, %v", got, files, err)
 	}
 }

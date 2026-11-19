@@ -18,6 +18,8 @@ package proxy
 
 import (
 	_ "embed"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -65,4 +67,68 @@ func renderBindings(cfg *ProxyConfig) string {
 	}
 	b.WriteString("\nAny other secret in your environment has no allowed destination yet; the user is asked on first use.")
 	return b.String()
+}
+
+// Claude Code takes text for its system prompt with claudeNotesFlag, or from a file
+// with claudeNotesFileFlag. It refuses a command that has both.
+const (
+	claudeNotesFlag     = "--append-system-prompt"
+	claudeNotesFileFlag = "--append-system-prompt-file"
+)
+
+// PromptFile is a file of system prompt text an agent run writes for Claude Code.
+type PromptFile struct {
+	Path    string
+	Content []byte
+}
+
+// CommandWithNotes returns the command with the notes given to the agent as an
+// argument. Only Claude Code takes them this way, so any other command is returned as
+// it is. The flag goes straight after the program, because Claude Code refuses it after
+// a subcommand. A command that already sets the flag keeps its one flag and gets the
+// notes after its own text, in the same argument.
+//
+// A command that names a file of text with claudeNotesFileFlag gets no flag added,
+// since Claude Code refuses the two together. The file it names is replaced by one for
+// the caller to write into dataDir: the text of the user's file and then the notes.
+// When the user's file cannot be read, the command is returned as it is, with the
+// error.
+func CommandWithNotes(command []string, notes, dataDir string, readFile func(string) ([]byte, error)) ([]string, []PromptFile, error) {
+	if len(command) == 0 || notes == "" || filepath.Base(command[0]) != "claude" {
+		return command, nil, nil
+	}
+	withNotes := slices.Clone(command)
+	var files []PromptFile
+	hasFlag := false
+	for i := 1; i < len(withNotes); i++ {
+		flag, value, inOneArgument := strings.Cut(withNotes[i], "=")
+		if flag != claudeNotesFlag && flag != claudeNotesFileFlag {
+			continue
+		}
+		prefix := flag + "="
+		if !inOneArgument {
+			if i+1 == len(withNotes) {
+				break
+			}
+			i++
+			prefix, value = "", withNotes[i]
+		}
+		if flag == claudeNotesFileFlag {
+			text, err := readFile(value)
+			if err != nil {
+				return command, nil, err
+			}
+			content := []byte(strings.TrimRight(string(text), "\n") + "\n\n" + notes)
+			files = append(files, PromptFile{Path: contentPath(dataDir, "append-system-prompt", ".md", content), Content: content})
+			value = files[len(files)-1].Path
+		} else {
+			value += "\n\n" + notes
+		}
+		withNotes[i] = prefix + value
+		hasFlag = true
+	}
+	if hasFlag {
+		return withNotes, files, nil
+	}
+	return slices.Concat(command[:1], []string{claudeNotesFlag, notes}, command[1:]), nil, nil
 }
