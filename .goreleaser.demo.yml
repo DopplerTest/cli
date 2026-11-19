@@ -25,8 +25,7 @@ builds:
     env:
       - CGO_ENABLED=0
     # The big 4: covers every Mac and Linux dev box / devcontainer a pilot customer runs.
-    # `doppler agent enforce` is Linux-only, but `proxy start` / `agent run` work on macOS
-    # via Docker Desktop. Add windows/amd64 here only if a customer needs it.
+    # Add windows/amd64 here only if a customer needs it.
     goos:
       - darwin
       - linux
