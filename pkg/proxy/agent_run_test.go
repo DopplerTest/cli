@@ -80,6 +80,11 @@ func TestExitCodeOf(t *testing.T) {
 	if got := ExitCodeOf(err); got != 3 {
 		t.Fatalf("exit 3 should be reported as 3, got %d", got)
 	}
+	// A process ended by a signal is reported the way a shell reports it.
+	err = exec.Command("sh", "-c", "kill -TERM $$").Run()
+	if got := ExitCodeOf(err); got != 143 {
+		t.Fatalf("a process ended by SIGTERM should be reported as 143, got %d", got)
+	}
 	// A failure that never produced a process still has to be reported as a failure.
 	if got := ExitCodeOf(errors.New("docker: not found")); got != 1 {
 		t.Fatalf("non-exec error should be exit 1, got %d", got)

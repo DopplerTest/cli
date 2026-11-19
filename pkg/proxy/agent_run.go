@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -80,6 +81,11 @@ func ExitCodeOf(err error) int {
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
+		// A process ended by a signal has no code of its own. Record what a shell
+		// reports for it, so a stop still reads as 130 or 143.
+		if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return 128 + int(status.Signal())
+		}
 		return exit.ExitCode()
 	}
 	return 1
