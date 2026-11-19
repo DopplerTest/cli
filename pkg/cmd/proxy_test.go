@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	agentproxy "github.com/DopplerTest/agent-proxy"
 	"github.com/DopplerHQ/cli/pkg/proxy"
+	agentproxy "github.com/DopplerTest/agent-proxy"
 )
 
 type staticSource map[string]string
