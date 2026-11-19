@@ -45,7 +45,7 @@ a request is refused, and where files persist. Nothing in them helps an agent mi
 			utils.HandleError(err, "unable to read the agent's proxy config")
 		}
 		scope, _ := cfg.ResolveForConfig(p.Config)
-		fmt.Print(proxy.RenderSandboxNotes(scope))
+		fmt.Print(proxy.RenderAgentNotes(scope))
 	},
 }
 

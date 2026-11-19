@@ -24,8 +24,8 @@ func notesFixture() *ProxyConfig {
 	}
 }
 
-func TestSandboxNotesSayWhatTheAgentNeeds(t *testing.T) {
-	n := RenderSandboxNotes(notesFixture())
+func TestAgentNotesSayWhatTheAgentNeeds(t *testing.T) {
+	n := RenderAgentNotes(notesFixture())
 	for _, want := range []string{
 		"dp.mask.",                 // what a placeholder looks like
 		"exactly as you find them", // how to use one
@@ -61,9 +61,9 @@ func TestSandboxNotesSayWhatTheAgentNeeds(t *testing.T) {
 	}
 }
 
-func TestSandboxNotesNeverHelpAnAgentMisbehave(t *testing.T) {
+func TestAgentNotesNeverHelpAnAgentMisbehave(t *testing.T) {
 	cfg := notesFixture()
-	n := strings.ToLower(RenderSandboxNotes(cfg))
+	n := strings.ToLower(RenderAgentNotes(cfg))
 	// Blind-tunneled hosts are the one route the proxy does not inspect; naming them
 	// would be a map to the exit. Mechanism details and evasion vocabulary likewise.
 	for _, host := range cfg.Passthrough {
@@ -78,8 +78,8 @@ func TestSandboxNotesNeverHelpAnAgentMisbehave(t *testing.T) {
 	}
 }
 
-func TestSandboxNotesWithNoBindings(t *testing.T) {
-	n := RenderSandboxNotes(&ProxyConfig{Passthrough: []string{"api.anthropic.com"}})
+func TestAgentNotesWithNoBindings(t *testing.T) {
+	n := RenderAgentNotes(&ProxyConfig{Passthrough: []string{"api.anthropic.com"}})
 	if !strings.Contains(n, "No secret has an allowed destination yet") {
 		t.Fatalf("empty bindings should be stated plainly:\n%s", n)
 	}

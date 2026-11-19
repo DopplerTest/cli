@@ -183,7 +183,7 @@ with the current directory mounted.`,
 			envNames = proxy.ExportAgentEnv(proxy.MergeAgentEnv(userEnv, defaults))
 			// The sandbox notes ride in the same way: exported here, named to docker, so
 			// the text never appears in the command line.
-			if err := os.Setenv(proxy.SandboxNotesEnv, proxy.RenderSandboxNotes(scope)); err != nil {
+			if err := os.Setenv(proxy.SandboxNotesEnv, proxy.RenderAgentNotes(scope)); err != nil {
 				utils.HandleError(err, "unable to prepare the sandbox notes")
 			}
 			envNames = append(envNames, proxy.SandboxNotesEnv)

@@ -24,7 +24,7 @@ import (
 
 // Every run starts with a short POSIX sh prelude inside the sandbox, run as the sandbox
 // user, that prepares the agent's home before exec'ing the real command. It delivers the
-// sandbox notes (see RenderSandboxNotes), merges them into the agent's own instruction
+// sandbox notes (see RenderAgentNotes), merges them into the agent's own instruction
 // file when we know where that is, and spares Claude its first-run wizard when a token
 // is supplied. The notes ride in as DOPPLER_SANDBOX_NOTES, named to docker the same way
 // credentials are so they never appear in the command line, and the variable is removed
