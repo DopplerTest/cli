@@ -328,16 +328,6 @@ var proxyStartCmd = &cobra.Command{
 			utils.HandleError(err, "unable to generate the proxy token")
 		}
 
-		// An agent's own provider credential is handed to its sandbox for real, so the
-		// proxy is told it too, to refuse it anywhere but the provider.
-		var agentType string
-		var agentEnv map[string]string
-		if agent != nil {
-			agentType = agent.Agent
-			localEnv, _ := proxy.ReadAgentEnv(proxy.AgentDir(configuration.UserConfigDir, agent.Name))
-			sharedEnv, _ := proxy.ReadSharedEnv(configuration.UserConfigDir)
-			agentEnv = proxy.MergeAgentEnv(localEnv, proxy.SharedEnvFor(agentType, sharedEnv))
-		}
 		opts, err := engineOptions(proxyConfig, proxyStartInputs{
 			address:            address,
 			dataDir:            dataDir,
@@ -347,8 +337,6 @@ var proxyStartCmd = &cobra.Command{
 			proxyToken:         proxyToken,
 			allowPrivateEgress: allowPrivateEgress,
 			source:             source,
-			agentType:          agentType,
-			agentEnv:           agentEnv,
 		})
 		if err != nil {
 			utils.HandleError(err, "invalid bindings in the proxy config")
@@ -440,9 +428,7 @@ func sortedCopy(names []string) []string {
 type proxyStartInputs struct {
 	address, dataDir, upstreamProxy, proxyToken string
 	allowPrivateEgress                          bool
-	passthrough                                 []string          // the --passthrough hosts, added to the config's
-	agentType                                   string            // the agent's type, for --agent; empty otherwise
-	agentEnv                                    map[string]string // what the agent's sandbox is handed by value
+	passthrough                                 []string // the --passthrough hosts, added to the config's
 	logOut                                      io.Writer
 	source                                      agentproxy.SecretSource
 }
@@ -471,7 +457,6 @@ func engineOptions(cfg *proxy.ProxyConfig, in proxyStartInputs) (proxy.Options, 
 		AllowProtocolUpgrades: policy.AllowProtocolUpgrades,
 		Methods:               policy.Methods,
 		PassByValue:           cfg.PassByValue,
-		AgentCredentials:      proxy.GuardedCredentials(in.agentType, in.agentEnv, policy.PassthroughHosts),
 	}, nil
 }
 

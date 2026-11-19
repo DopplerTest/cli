@@ -39,8 +39,8 @@ type AgentProfile struct {
 	Command []string `yaml:"command" json:"command"`
 	// Agent is the program family the user picked when creating the agent (claude, codex,
 	// gemini, aider or other), kept apart from Command so a wrapper or alias in the command
-	// does not change which provider credential the agent is offered. Empty on agents
-	// created before the field existed; callers fall back to the command then.
+	// does not change which provider's hosts the agent's proxy config starts with. Empty on
+	// agents created before the field existed; callers fall back to the command then.
 	Agent     string `yaml:"agent,omitempty" json:"agent"`
 	TokenSlug string `yaml:"token_slug,omitempty" json:"token_slug"`
 	TokenName string `yaml:"token_name,omitempty" json:"token_name"`

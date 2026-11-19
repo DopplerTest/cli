@@ -8,12 +8,15 @@ you may not use this file except in compliance with the License.
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
+	"github.com/DopplerHQ/cli/pkg/configuration"
 	"github.com/DopplerHQ/cli/pkg/models"
 	"github.com/DopplerHQ/cli/pkg/proxy"
 )
@@ -143,5 +146,36 @@ func TestBackfillWorkplacesRecordsFromEachAgentsOwnToken(t *testing.T) {
 	// Only the agents that have a token and no workplace are looked up, each with its own token.
 	if len(looked) != 2 || (looked[0] != "dp.st.other" && looked[1] != "dp.st.other") || (looked[0] != "dp.st.gone" && looked[1] != "dp.st.gone") {
 		t.Fatalf("looked up %v, want the legacy and failing tokens only", looked)
+	}
+}
+
+// The desktop app reads this shape from agent list, show, create and rotate, so the
+// field names are pinned here.
+func TestAgentViewJSONFields(t *testing.T) {
+	configDir := t.TempDir()
+	previous := configuration.UserConfigDir
+	configuration.UserConfigDir = configDir
+	t.Cleanup(func() { configuration.UserConfigDir = previous })
+
+	data, err := json.Marshal(viewOf(proxy.AgentProfile{Name: "demo", Project: "proj", Config: "dev", Command: []string{"claude"}, Agent: "claude"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(fields))
+	for name := range fields {
+		got = append(got, name)
+	}
+	slices.Sort(got)
+	want := []string{
+		"agent", "agent_env_path", "ca_path", "command", "config", "config_path", "created_at", "data_dir", "dir",
+		"has_token", "last_run", "listen_address", "name", "project", "token_expires_at", "token_name", "token_slug",
+		"workplace_name", "workplace_slug",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("agent view fields = %v, want %v", got, want)
 	}
 }

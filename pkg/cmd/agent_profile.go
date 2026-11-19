@@ -46,11 +46,6 @@ type agentView struct {
 	CAPath        string `json:"ca_path"`
 	HasToken      bool   `json:"has_token"`
 	ListenAddress string `json:"listen_address"`
-	// EnvKeys are the names in the agent's local environment (provider credentials). Values are never exposed.
-	EnvKeys []string `json:"env_keys"`
-	// SharedEnvKeys are the names in the shared environment every agent inherits. An
-	// agent's own entry wins over a shared one of the same name. Values are never exposed.
-	SharedEnvKeys []string `json:"shared_env_keys"`
 	// LastRun is nil until the agent has been run at least once.
 	LastRun *proxy.LastRun `json:"last_run"`
 }
@@ -58,14 +53,6 @@ type agentView struct {
 func viewOf(p proxy.AgentProfile) agentView {
 	dir := proxy.AgentDir(configuration.UserConfigDir, p.Name)
 	data := proxy.AgentDataDir(dir)
-	envKeys := proxy.AgentEnvKeys(dir)
-	if envKeys == nil {
-		envKeys = []string{}
-	}
-	sharedEnvKeys := proxy.SharedEnvKeys(configuration.UserConfigDir)
-	if sharedEnvKeys == nil {
-		sharedEnvKeys = []string{}
-	}
 	// A corrupt record reads as "never run" rather than breaking the whole listing.
 	lastRun, _ := proxy.ReadLastRun(dir)
 	return agentView{
@@ -77,8 +64,6 @@ func viewOf(p proxy.AgentProfile) agentView {
 		CAPath:        agentproxy.CACertPath(data),
 		HasToken:      proxy.ReadAgentToken(dir) != "",
 		ListenAddress: proxy.ReadListenAddress(proxy.AgentConfigPath(dir)),
-		EnvKeys:       envKeys,
-		SharedEnvKeys: sharedEnvKeys,
 		LastRun:       lastRun,
 	}
 }
@@ -422,7 +407,7 @@ func init() {
 	agentCreateCmd.Flags().StringP("project", "p", "", "Doppler project the agent reads")
 	agentCreateCmd.Flags().StringP("config", "c", "", "Doppler config the agent reads")
 	agentCreateCmd.Flags().String("command", "claude", "command that agent run starts when none is given after --")
-	agentCreateCmd.Flags().String("agent", "", "the agent family the command runs (claude, codex, gemini, aider or other); decides the provider hosts and credential, defaults to the command's program")
+	agentCreateCmd.Flags().String("agent", "", "the agent family the command runs (claude, codex, gemini, aider or other); decides the provider hosts, defaults to the command's program")
 	agentCreateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentRotateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentDeleteCmd.Flags().Bool("keep-token", false, "leave the service token in place")
