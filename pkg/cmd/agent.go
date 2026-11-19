@@ -17,19 +17,16 @@ limitations under the License.
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
 	"os/exec"
-	"os/signal"
 	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/DopplerHQ/cli/pkg/configuration"
@@ -38,9 +35,7 @@ import (
 	"github.com/DopplerHQ/cli/pkg/version"
 	agentproxy "github.com/DopplerTest/agent-proxy"
 	"github.com/DopplerTest/agent-proxy/enforce"
-	"github.com/DopplerTest/agent-proxy/sandbox"
 	"github.com/DopplerTest/agent-proxy/verify"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -50,199 +45,167 @@ var agentCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 }
 
-// agentRunChildEnv marks the inner `agent run` that does the work under the pseudo-terminal
-// the outer one holds, so it does not wrap itself again.
-const agentRunChildEnv = "DOPPLER_AGENT_RUN_CHILD"
+// hostRun is what `agent run` resolves before it starts the command.
+type hostRun struct {
+	command   []string           // the program and its arguments, before the notes are added
+	notes     string             // the agent notes, empty without a named agent
+	config    *proxy.ProxyConfig // the agent's proxy config, empty without a named agent
+	dataDir   string             // the proxy data directory, which holds ca.crt and agent.env
+	startHint string             // the command that starts this run's proxy
+	agentDir  string             // where the run is recorded, empty without a named agent
+}
 
-// runUnderTerminal re-runs this command as a child on a pseudo-terminal, when the run has a
-// terminal to begin with, and copies to the clipboard here whatever the sandbox copies with
-// an OSC 52 write. Claude Code, with no clipboard tool in the sandbox, copies that way, and
-// Terminal.app ignores the sequence, so without this the text never left the container. The
-// child exits as the sandbox did and this process exits the same way; a child that could not
-// be started falls back to running the sandbox here, without the clipboard.
-func runUnderTerminal() {
-	if os.Getenv(agentRunChildEnv) != "" || !isatty.IsTerminal(os.Stdin.Fd()) || !isatty.IsTerminal(os.Stdout.Fd()) {
-		return
+// resolveHostRun reads the run from the arguments. A first argument naming an existing
+// agent selects that agent, and the rest, if any, replaces the agent's own command.
+// Otherwise every argument is the command, and the proxy is the plain `proxy start` one.
+func resolveHostRun(cmd *cobra.Command, args []string) hostRun {
+	var agent *proxy.AgentProfile
+	if len(args) > 0 && cmd.ArgsLenAtDash() != 0 {
+		agent, _ = proxy.LoadAgent(configuration.UserConfigDir, args[0])
 	}
-	exe, err := os.Executable()
+	if agent == nil {
+		return hostRun{
+			command:   firstCommand(args),
+			config:    &proxy.ProxyConfig{},
+			dataDir:   proxyDataDir(),
+			startHint: fmt.Sprintf("%s proxy start", cmd.Root().Name()),
+		}
+	}
+	agentDir := proxy.AgentDir(configuration.UserConfigDir, agent.Name)
+	cfg, _, err := proxy.LoadOrScaffold(proxy.AgentConfigPath(agentDir))
 	if err != nil {
-		return
+		utils.HandleError(err, "unable to read the agent's proxy config")
 	}
-	child := exec.Command(exe, os.Args[1:]...)
-	child.Env = append(os.Environ(), agentRunChildEnv+"=1")
-	code, err := proxy.RunUnderTerminal(child, func(text string) { _ = utils.CopyToClipboard(text) })
+	scope, _ := cfg.ResolveForConfig(agent.Config)
+	return hostRun{
+		command:   firstCommand(args[1:], agent.Command),
+		notes:     proxy.RenderAgentNotes(scope),
+		config:    scope,
+		dataDir:   proxy.AgentDataDir(agentDir),
+		startHint: fmt.Sprintf("%s proxy start --agent %s", cmd.Root().Name(), agent.Name),
+		agentDir:  agentDir,
+	}
+}
+
+// firstCommand returns the first of the commands that is not empty, or claude.
+func firstCommand(commands ...[]string) []string {
+	for _, command := range commands {
+		if len(command) > 0 {
+			return command
+		}
+	}
+	return []string{"claude"}
+}
+
+// proxyAddress returns the host and port of the proxy that agent.env names in
+// HTTPS_PROXY, or nothing when it names none.
+func proxyAddress(entries []string) string {
+	value := ""
+	for _, entry := range entries {
+		if last, ok := strings.CutPrefix(entry, "HTTPS_PROXY="); ok {
+			value = last
+		}
+	}
+	proxyURL, err := url.Parse(value)
 	if err != nil {
-		utils.LogDebugError(err)
+		return ""
+	}
+	return proxyURL.Host
+}
+
+// record keeps the run beside the profile so the desktop app can tell runs apart, no
+// matter which terminal launched this one. A failed write must not stop the run.
+func (r hostRun) record(run proxy.LastRun, moment string) {
+	if r.agentDir == "" {
 		return
 	}
-	os.Exit(code)
+	if err := proxy.WriteLastRun(r.agentDir, run); err != nil {
+		utils.LogWarning(fmt.Sprintf("Unable to record the %s of this run: %v", moment, err))
+	}
 }
 
 var agentRunCmd = &cobra.Command{
-	Use:   "run [<agent>] [-- <command>]",
-	Short: "Run an agent, or a command, inside a locked-down sandbox whose only egress is the proxy",
-	Long: `Run a named agent inside the sandbox using its command and mounts, against the
-proxy started for it with ` + "`proxy start --agent <name>`" + `. A command after -- replaces
-the agent's own. Without an agent name, run the command against the default proxy
-with the current directory mounted.`,
-	Args: cobra.ArbitraryArgs,
+	Use:   "run [<agent>] [-- <command> [args...]]",
+	Short: "Run an agent, or any command, on this machine through the proxy",
+	Long: `Run a named agent on this machine, with its requests sent through the proxy started
+for it with ` + "`proxy start --agent <name>`" + `. The agent's environment gets the proxy
+address, the proxy's CA and a placeholder for each secret. A command after -- replaces
+the agent's own. With neither, the command is claude. Claude Code is also given the
+agent notes when it starts.
+
+Without an agent name, run the command against the proxy started with a plain
+` + "`proxy start`" + `.`,
+	Example: `doppler-beta agent run backend-claude -- claude`,
+	Args:    cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		runUnderTerminal()
-		proxyPort, _ := cmd.Flags().GetInt("proxy-port")
-		rebuild, _ := cmd.Flags().GetBool("rebuild")
-		dockerBin, _ := cmd.Flags().GetString("docker")
-		mountFlags, _ := cmd.Flags().GetStringArray("mount")
-
-		// A first argument naming an existing agent selects profile mode; the rest,
-		// if any, replaces the profile's command.
-		var agent *proxy.AgentProfile
-		command := args
-		if len(args) > 0 && cmd.ArgsLenAtDash() != 0 {
-			if p, err := proxy.LoadAgent(configuration.UserConfigDir, args[0]); err == nil {
-				agent = p
-				command = args[1:]
-			}
-		}
-		dataDir := proxyDataDir()
-		var mounts []string
-		if agent != nil {
-			dataDir = proxy.AgentDataDir(proxy.AgentDir(configuration.UserConfigDir, agent.Name))
-			mounts = append(mounts, agent.Mounts...)
-			if len(command) == 0 {
-				command = agent.Command
-			}
-			if !cmd.Flags().Changed("proxy-port") {
-				proxyPort = proxy.AgentPort(configuration.UserConfigDir, agent.Name)
-			}
-		}
-		if len(command) == 0 {
-			utils.HandleError(errors.New("nothing to run: name an agent, or pass a command after --"))
-		}
-		for _, m := range mountFlags {
-			host, ro, err := proxy.ParseMount(m)
-			if err != nil {
-				utils.HandleError(err, "invalid --mount")
-			}
-			if ro {
-				host += ":ro"
-			}
-			mounts = append(mounts, host)
-		}
-		if agent == nil && len(mountFlags) == 0 {
-			if cwd, err := os.Getwd(); err == nil {
-				mounts = []string{cwd}
-			}
-		}
-
-		caPath := agentproxy.CACertPath(dataDir)
-		envPath := agentproxy.AgentEnvPath(dataDir)
-		startHint := fmt.Sprintf("%s proxy start --address 0.0.0.0:%d", cmd.Root().Name(), proxyPort)
-		if agent != nil {
-			startHint = fmt.Sprintf("%s proxy start --agent %s", cmd.Root().Name(), agent.Name)
-		}
+		run := resolveHostRun(cmd, args)
+		caPath, envPath := agentproxy.CACertPath(run.dataDir), agentproxy.AgentEnvPath(run.dataDir)
 		for _, p := range []string{caPath, envPath} {
 			if _, err := os.Stat(p); err != nil {
-				utils.HandleError(fmt.Errorf("proxy artifacts not found (%s). Start the proxy first, bound to an address the sandbox can reach:\n  %s", p, startHint))
+				utils.HandleError(fmt.Errorf("proxy artifacts not found (%s). Start the proxy first:\n  %s", p, run.startHint))
+			}
+		}
+		agentEnv, err := os.ReadFile(envPath)
+		if err != nil {
+			utils.HandleError(err, "unable to read the proxy's agent.env")
+		}
+		entries := proxy.ParseAgentEnv(string(agentEnv))
+		// Without the proxy's address the command would send its requests straight to
+		// their hosts, and report nothing wrong.
+		address := proxyAddress(entries)
+		if address == "" {
+			utils.HandleError(fmt.Errorf("proxy address not found (%s). Restart the proxy:\n  %s", envPath, run.startHint))
+		}
+		// The proxy leaves its files behind when it exits, so they do not show that it
+		// is running. Without it every request of the command would fail.
+		conn, err := net.DialTimeout("tcp", address, time.Second)
+		if err != nil {
+			utils.HandleError(fmt.Errorf("proxy not running (%s). Start the proxy first:\n  %s", address, run.startHint))
+		}
+		conn.Close() // #nosec G104
+		proxyCA, err := os.ReadFile(caPath)
+		if err != nil {
+			utils.HandleError(err, "unable to read the proxy's CA")
+		}
+		caFiles := proxy.CAFiles(os.Environ(), proxyCA, run.dataDir, os.ReadFile)
+		for _, file := range caFiles {
+			if err := utils.WriteFile(file.Path, file.Content, 0o600); err != nil {
+				utils.HandleError(err, "unable to write the CA bundle")
+			}
+		}
+		env := proxy.RunEnv{Base: os.Environ(), AgentEnv: entries, CAFiles: caFiles, Config: run.config}.Environ()
+		command, promptFiles, err := proxy.CommandWithNotes(run.command, run.notes, run.dataDir, os.ReadFile)
+		if err != nil {
+			utils.LogWarning(fmt.Sprintf("Unable to read the file of --append-system-prompt-file (%v). The command runs as you wrote it, without the agent notes.", err))
+		}
+		for _, file := range promptFiles {
+			if err := utils.WriteFile(file.Path, file.Content, 0o600); err != nil {
+				utils.HandleError(err, "unable to write the agent notes")
 			}
 		}
 
-		fresh, _ := cmd.Flags().GetBool("fresh")
-		resume, _ := cmd.Flags().GetBool("resume")
-		homeVolume := ""
-		if agent != nil && !fresh {
-			homeVolume = proxy.AgentHomeVolume(agent.Name)
+		record := proxy.LastRun{StartedAt: time.Now().UTC(), Command: run.command}
+		run.record(record, "start")
+		// No signal ends this process, so the record is still closed when the run is
+		// stopped or its terminal window closes.
+		child, runErr := utils.RunCommandAsJob(command, env, os.Stdin, os.Stdout, os.Stderr)
+		if runErr == nil {
+			runErr = child.Wait()
 		}
+		ended := time.Now().UTC()
+		code := proxy.ExitCodeOf(runErr)
+		record.EndedAt, record.ExitCode = &ended, &code
+		run.record(record, "end")
 
-		// The agent's local environment (its provider credential) is exported into this
-		// process and only named to docker, so the values are inherited rather than written
-		// into the command line. It never touches Doppler or the proxy. The shared
-		// environment is laid underneath it, and the sandbox defaults underneath both, so
-		// the agent's own value wins on a clash. The defaults include the region of the
-		// agent's AWS signing pairs.
-		agentDir := ""
-		if agent != nil {
-			agentDir = proxy.AgentDir(configuration.UserConfigDir, agent.Name)
+		var exit *exec.ExitError
+		if runErr != nil && !errors.As(runErr, &exit) {
+			utils.HandleError(runErr, "unable to run "+command[0])
 		}
-		envNames := proxy.ExportAgentEnv(proxy.RunDefaults)
-		if agent != nil {
-			cfg, _, err := proxy.LoadOrScaffold(proxy.AgentConfigPath(agentDir))
-			if err != nil {
-				utils.HandleError(err, "unable to read the agent's proxy config")
-			}
-			scope, _ := cfg.ResolveForConfig(agent.Config)
-			localEnv, err := proxy.ReadAgentEnv(agentDir)
-			if err != nil {
-				utils.HandleError(err, "unable to read the agent's local environment")
-			}
-			sharedEnv, err := proxy.ReadSharedEnv(configuration.UserConfigDir)
-			if err != nil {
-				utils.HandleError(err, "unable to read the shared environment")
-			}
-			userEnv := proxy.MergeAgentEnv(localEnv, proxy.SharedEnvFor(agent.Agent, sharedEnv))
-			defaults := proxy.MergeAgentEnv(proxy.AWSRegionEnv(scope, userEnv), proxy.RunDefaults)
-			envNames = proxy.ExportAgentEnv(proxy.MergeAgentEnv(userEnv, defaults))
-			// The sandbox notes ride in the same way: exported here, named to docker, so
-			// the text never appears in the command line.
-			if err := os.Setenv(proxy.SandboxNotesEnv, proxy.RenderAgentNotes(scope)); err != nil {
-				utils.HandleError(err, "unable to prepare the sandbox notes")
-			}
-			envNames = append(envNames, proxy.SandboxNotesEnv)
+		// SIGTERM (143) and Ctrl-C (130) end a run on purpose, so say so.
+		if proxy.IsStopExitCode(code) {
+			utils.Log("Run stopped.")
 		}
-		cfg := sandbox.Config{
-			ProxyPort:    proxyPort,
-			CACertPath:   caPath,
-			AgentEnvPath: envPath,
-			Command:      proxy.WrapRun(command, envNames, resume),
-			DockerBin:    dockerBin,
-			Interactive:  true,
-			Mounts:       mounts,
-			HomeVolume:   homeVolume,
-			Env:          envNames,
-		}
-
-		// SIGHUP too: closing the terminal window must still let the run record close.
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-		defer stop()
-
-		if rebuild {
-			utils.Log("Rebuilding sandbox image…")
-			if err := sandbox.BuildImage(ctx, cfg); err != nil {
-				utils.HandleError(err, "failed to build the sandbox image")
-			}
-		} else {
-			utils.Log("Preparing sandbox image (first run may take a few minutes)…")
-			if err := sandbox.EnsureImage(ctx, cfg); err != nil {
-				utils.HandleError(err, "failed to prepare the sandbox image")
-			}
-		}
-
-		// Record the run beside the profile so the desktop app can tell runs apart, no
-		// matter which terminal launched this one. A failed write must not stop the run.
-		var record *proxy.LastRun
-		if agent != nil {
-			record = &proxy.LastRun{StartedAt: time.Now().UTC(), Command: command}
-			if err := proxy.WriteLastRun(agentDir, *record); err != nil {
-				utils.PrintWarning(fmt.Sprintf("Unable to record the start of this run: %v", err))
-			}
-		}
-		runErr := sandbox.Run(ctx, cfg)
-		if record != nil {
-			ended := time.Now().UTC()
-			code := proxy.ExitCodeOf(runErr)
-			record.EndedAt, record.ExitCode = &ended, &code
-			if err := proxy.WriteLastRun(agentDir, *record); err != nil {
-				utils.PrintWarning(fmt.Sprintf("Unable to record the end of this run: %v", err))
-			}
-		}
-		if runErr != nil {
-			// SIGTERM (143) and Ctrl-C (130) are how `agent stop` and the user end a run on
-			// purpose, so report those as a stop rather than a failure.
-			if code := proxy.ExitCodeOf(runErr); proxy.IsStopExitCode(code) {
-				utils.Log("Sandbox stopped.")
-				os.Exit(code)
-			}
-			utils.HandleError(runErr, "sandbox exited with an error")
-		}
+		os.Exit(code)
 	},
 }
 
@@ -574,12 +537,6 @@ func proxyUserinfo(rawEnv []byte) string {
 }
 
 func init() {
-	agentRunCmd.Flags().Int("proxy-port", 14322, "port the credential proxy is listening on")
-	agentRunCmd.Flags().Bool("rebuild", false, "rebuild the sandbox image before running")
-	agentRunCmd.Flags().String("docker", "docker", "container CLI to use (docker, podman, ...)")
-	agentRunCmd.Flags().Bool("fresh", false, "start from an empty home instead of the agent's persisted one (login state, settings and history)")
-	agentRunCmd.Flags().Bool("resume", false, "continue the agent's latest conversation in its working directory when it has one, otherwise start a new one")
-	agentRunCmd.Flags().StringArray("mount", nil, "host directory mounted at /workspace/<basename>; repeat for more, append :ro for read-only (default: the agent's mounts, or the current directory)")
 	agentCmd.AddCommand(agentRunCmd)
 
 	agentDoctorCmd.Flags().Bool("enforced", false, "assert the full contract: an egress-containment failure is fatal")

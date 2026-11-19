@@ -516,7 +516,7 @@ func init() {
 }
 
 // loadOrMintProxyToken returns the credential clients must present to this proxy.
-// It lives beside the CA in the data dir and is reused across restarts, so a sandbox
+// It lives beside the CA in the data dir and is reused across restarts, so an agent
 // that is already running keeps working when the proxy is restarted to pick up a
 // config change. The data dir is 0700 and the file 0600.
 func loadOrMintProxyToken(dataDir string) (string, error) {

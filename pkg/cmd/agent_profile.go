@@ -432,7 +432,7 @@ func httpErr(herr http.Error) error {
 func init() {
 	agentCreateCmd.Flags().StringP("project", "p", "", "Doppler project the agent reads")
 	agentCreateCmd.Flags().StringP("config", "c", "", "Doppler config the agent reads")
-	agentCreateCmd.Flags().String("command", "claude", "command the sandbox runs")
+	agentCreateCmd.Flags().String("command", "claude", "command that agent run starts when none is given after --")
 	agentCreateCmd.Flags().String("agent", "", "the agent family the command runs (claude, codex, gemini, aider or other); decides the provider hosts and credential, defaults to the command's program")
 	agentCreateCmd.Flags().StringArray("mount", nil, "host directory mounted at /workspace/<basename>; repeat for more, append :ro for read-only")
 	agentCreateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")

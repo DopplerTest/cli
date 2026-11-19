@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestLastRunRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// While the sandbox is still up, the record has a start but no end.
+	// While the command is still running, the record has a start but no end.
 	got, err := ReadLastRun(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +63,19 @@ func TestLastRunRoundTrip(t *testing.T) {
 	}
 }
 
+// An agent can be deleted while its command is still running. The record of that run
+// must not bring the agent's directory back.
+func TestWriteLastRunWritesNothingForAnAgentWithNoDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "deleted")
+
+	if err := WriteLastRun(dir, LastRun{StartedAt: time.Now(), Command: []string{"claude"}}); err != nil {
+		t.Errorf("WriteLastRun = %v, want no error for an agent that is gone", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the directory of the deleted agent is there again: %v", err)
+	}
+}
+
 func TestReadLastRunRejectsCorruptFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(AgentLastRunPath(dir), []byte("{not json"), 0o644); err != nil {
@@ -86,7 +100,7 @@ func TestExitCodeOf(t *testing.T) {
 		t.Fatalf("a process ended by SIGTERM should be reported as 143, got %d", got)
 	}
 	// A failure that never produced a process still has to be reported as a failure.
-	if got := ExitCodeOf(errors.New("docker: not found")); got != 1 {
+	if got := ExitCodeOf(errors.New("exec: not found")); got != 1 {
 		t.Fatalf("non-exec error should be exit 1, got %d", got)
 	}
 }

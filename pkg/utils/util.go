@@ -107,6 +107,31 @@ func Cwd() string {
 
 // RunCommand runs the specified command
 func RunCommand(command []string, env []string, inFile io.Reader, outFile io.Writer, errFile io.Writer, forwardSignals bool) (*exec.Cmd, error) {
+	cmd := newCommand(command, env, inFile, outFile, errFile)
+	err := execCommand(cmd, forwardSignals)
+	return cmd, err
+}
+
+// RunCommandAsJob runs the specified command for a user who started this process as a
+// job of their shell. A terminal sends the signals of its own keys, like Ctrl-C, to
+// every process of its foreground job. So while this process is in that job those
+// signals are not passed on, and the command gets each of them once, from the terminal.
+// SIGTERM and SIGHUP are passed on there too, since they are mostly sent to this
+// process alone. One sent to the whole job, like the SIGHUP of a terminal that closes,
+// reaches the command twice: from its sender and passed on from here. Anywhere else
+// every signal is passed on. The stop signals of job control are never caught, so
+// Ctrl-Z stops this process together with the command and fg resumes both.
+func RunCommandAsJob(command []string, env []string, inFile io.Reader, outFile io.Writer, errFile io.Writer) (*exec.Cmd, error) {
+	cmd := newCommand(command, env, inFile, outFile, errFile)
+	err := startCommand(cmd, func(sig os.Signal) {
+		if sig == syscall.SIGTERM || sig == syscall.SIGHUP || !inForegroundOfTerminal() {
+			cmd.Process.Signal(sig) // #nosec G104
+		}
+	}, jobSignals()...)
+	return cmd, err
+}
+
+func newCommand(command []string, env []string, inFile io.Reader, outFile io.Writer, errFile io.Writer) *exec.Cmd {
 	cmd := exec.Command(command[0], command[1:]...) // #nosec G204 nosemgrep: semgrep_configs.prohibit-exec-command
 	// Resolves https://github.com/DopplerHQ/cli/issues/415
 	if errors.Is(cmd.Err, exec.ErrDot) {
@@ -117,9 +142,7 @@ func RunCommand(command []string, env []string, inFile io.Reader, outFile io.Wri
 	cmd.Stdin = inFile
 	cmd.Stdout = outFile
 	cmd.Stderr = errFile
-
-	err := execCommand(cmd, forwardSignals)
-	return cmd, err
+	return cmd
 }
 
 // RunCommandString runs the specified command string
@@ -149,9 +172,22 @@ func RunCommandString(command string, env []string, inFile io.Reader, outFile io
 }
 
 func execCommand(cmd *exec.Cmd, forwardSignals bool) error {
+	return startCommand(cmd, func(sig os.Signal) {
+		// When running with a TTY, user-generated signals (like SIGINT) are sent to the entire process group.
+		// If we forward the signal, the child process will end up receiving the signal twice.
+		if forwardSignals {
+			// forward to process
+			cmd.Process.Signal(sig) // #nosec G104
+		}
+	})
+}
+
+// startCommand starts cmd and gives onSignal each of the signals this process receives
+// from then on, or every signal when none is named.
+func startCommand(cmd *exec.Cmd, onSignal func(os.Signal), signals ...os.Signal) error {
 	// signal handling logic adapted from aws-vault https://github.com/99designs/aws-vault/
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan)
+	signal.Notify(sigChan, signals...)
 
 	if err := cmd.Start(); err != nil {
 		return err
@@ -160,16 +196,7 @@ func execCommand(cmd *exec.Cmd, forwardSignals bool) error {
 	// handle all signals
 	go func() {
 		for {
-			// When running with a TTY, user-generated signals (like SIGINT) are sent to the entire process group.
-			// If we forward the signal, the child process will end up receiving the signal twice.
-			if forwardSignals {
-				// forward to process
-				sig := <-sigChan
-				cmd.Process.Signal(sig) // #nosec G104
-			} else {
-				// ignore
-				<-sigChan
-			}
+			onSignal(<-sigChan)
 		}
 	}()
 

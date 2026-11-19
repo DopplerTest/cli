@@ -44,21 +44,21 @@ const agentLocalEnvFile = "env"
 
 var envKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
-// RunDefaults are the entries every sandbox starts with. They sit beneath the
-// shared environment and the agent's own, so either can override them.
+// RunDefaults are the entries every agent run starts with, unless the environment the
+// agent is given already sets them.
 //
 // AWS_REQUEST_CHECKSUM_CALCULATION: by default the AWS SDKs and CLI upload in
 // aws-chunked bodies, signed chunk by chunk with the secret key the agent holds, which
-// in the sandbox is a placeholder. The proxy cannot sign those and refuses them.
-// when_required makes the SDKs send a whole body instead, which the proxy signs.
+// is a placeholder. The proxy cannot sign those and refuses them. when_required makes
+// the SDKs send a whole body instead, which the proxy signs.
 var RunDefaults = map[string]string{"AWS_REQUEST_CHECKSUM_CALCULATION": "when_required"}
 
 // AWSRegionEnv is the region the config's AWS signing pairs name, as AWS_REGION and
 // AWS_DEFAULT_REGION. Without one the AWS CLI and SDKs ask the instance metadata
-// endpoint for a region, which the sandbox cannot reach. Pairs that name different
-// regions leave both unset, since no one default suits them all. So does a region the
-// user already stores in env under either name: the AWS tools read AWS_REGION first,
-// so adding it would override a stored AWS_DEFAULT_REGION.
+// endpoint for a region, which a developer's machine does not have. Pairs that name
+// different regions leave both unset, since no one default suits them all. So does a
+// region env already holds under either name: the AWS tools read AWS_REGION first, so
+// adding it would override an AWS_DEFAULT_REGION the user set.
 func AWSRegionEnv(cfg *ProxyConfig, env map[string]string) map[string]string {
 	if env["AWS_REGION"] != "" || env["AWS_DEFAULT_REGION"] != "" {
 		return nil

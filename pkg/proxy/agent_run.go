@@ -27,7 +27,7 @@ import (
 )
 
 // The agent's last run: a small JSON record beside the profile that `agent run` writes
-// when the sandbox starts and completes when it exits. The proxy outlives any one run
+// when the command starts and completes when it exits. The proxy outlives any one run
 // and the run itself happens in whatever terminal launched it, so this record is how
 // the desktop app (or `agent profile --json`) learns where one run ended and the next
 // began. It holds no secrets.
@@ -35,7 +35,7 @@ const agentLastRunFile = "last-run.json"
 
 type LastRun struct {
 	StartedAt time.Time `json:"started_at"`
-	// EndedAt and ExitCode are nil while the sandbox is still running.
+	// EndedAt and ExitCode are nil while the command is still running.
 	EndedAt  *time.Time `json:"ended_at"`
 	ExitCode *int       `json:"exit_code"`
 	Command  []string   `json:"command"`
@@ -61,20 +61,25 @@ func ReadLastRun(dir string) (*LastRun, error) {
 	return &run, nil
 }
 
+// WriteLastRun writes the record into the agent's directory, and writes nothing for an
+// agent with no directory. That is an agent deleted while its command was running. A
+// directory made for the record would bring the agent's name back, and an agent created
+// with that name later would start with the last run of the deleted one.
 func WriteLastRun(dir string, run LastRun) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
 	data, err := json.Marshal(run)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(AgentLastRunPath(dir), data, 0o644)
+	err = os.WriteFile(AgentLastRunPath(dir), data, 0o644)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
-// ExitCodeOf maps the error from running the sandbox to the exit code to record:
+// ExitCodeOf maps the error from running the command to the exit code to record:
 // the process's own code when there was one, 0 for success, and 1 for a failure
-// that never produced a process (docker missing, bad mounts).
+// that never produced a process (a command that is not installed).
 func ExitCodeOf(err error) int {
 	if err == nil {
 		return 0
@@ -91,6 +96,6 @@ func ExitCodeOf(err error) int {
 	return 1
 }
 
-// IsStopExitCode reports whether an exit code means the sandbox was told to stop
-// (SIGTERM from `agent stop` or docker, Ctrl-C from the user) rather than failed.
+// IsStopExitCode reports whether an exit code means the run was told to stop
+// (SIGTERM, or Ctrl-C from the user) rather than failed.
 func IsStopExitCode(code int) bool { return code == 143 || code == 130 }

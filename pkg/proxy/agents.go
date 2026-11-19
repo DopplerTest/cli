@@ -29,7 +29,7 @@ import (
 )
 
 // AgentProfile is a named agent: the Doppler project and config it reads, the
-// command the sandbox runs, the host directories mounted into it, and the service
+// command `agent run` starts, the host directories mounted into it, and the service
 // token minted for it. Its proxy config (bindings, passthrough, ...) lives beside it
 // as config.yaml, and its proxy state (CA, agent env, log) under proxy/.
 type AgentProfile struct {
@@ -188,18 +188,6 @@ func NextAgentPort(configDir string) int {
 		port++
 	}
 	return port
-}
-
-// AgentPort returns the port an agent's proxy listens on, from its config.yaml.
-func AgentPort(configDir, name string) int {
-	addr := ReadListenAddress(AgentConfigPath(AgentDir(configDir, name)))
-	if i := strings.LastIndex(addr, ":"); i >= 0 {
-		var port int
-		if _, err := fmt.Sscanf(addr[i+1:], "%d", &port); err == nil {
-			return port
-		}
-	}
-	return DefaultAgentPort
 }
 
 // AgentHomeVolume names the Docker volume that keeps the agent's home directory
