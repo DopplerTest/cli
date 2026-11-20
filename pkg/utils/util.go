@@ -16,6 +16,7 @@ limitations under the License.
 package utils
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -129,6 +130,29 @@ func RunCommandAsJob(command []string, env []string, inFile io.Reader, outFile i
 		}
 	}, jobSignals()...)
 	return cmd, err
+}
+
+// ErrCommandTimedOut is what CommandOutput returns for a command it had to end.
+var ErrCommandTimedOut = errors.New("the command did not finish in time")
+
+// CommandOutput runs the specified command to its end and returns what it printed. A
+// command still running after the timeout is ended. Unlike RunCommand it catches no
+// signal. A signal RunCommand catches stays caught for the rest of this process, which
+// would take the stop signals away from a job that RunCommandAsJob starts later.
+func CommandOutput(command []string, timeout time.Duration) ([]byte, error) {
+	var output bytes.Buffer
+	cmd := newCommand(command, os.Environ(), nil, &output, &output)
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	timer := time.AfterFunc(timeout, func() {
+		cmd.Process.Kill() // #nosec G104
+	})
+	err := cmd.Wait()
+	if !timer.Stop() {
+		return output.Bytes(), ErrCommandTimedOut
+	}
+	return output.Bytes(), err
 }
 
 func newCommand(command []string, env []string, inFile io.Reader, outFile io.Writer, errFile io.Writer) *exec.Cmd {

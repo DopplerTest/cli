@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ import (
 	agentproxy "github.com/DopplerTest/agent-proxy"
 	"github.com/DopplerTest/agent-proxy/enforce"
 	"github.com/DopplerTest/agent-proxy/verify"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -113,6 +115,47 @@ func proxyAddress(entries []string) string {
 	return proxyURL.Host
 }
 
+// securityTool runs the security tool of macOS. Adding a trusted certificate puts a
+// prompt of macOS on screen, and with nobody to answer it the tool would wait for good,
+// so it gets half a minute. It is a variable so that the tests of this package put a
+// stand-in here and never reach a real keychain.
+var securityTool = func(args ...string) ([]byte, error) {
+	return utils.CommandOutput(append([]string{"/usr/bin/security"}, args...), 30*time.Second)
+}
+
+func loginKeychain() proxy.Keychain {
+	return proxy.Keychain{GOOS: runtime.GOOS, Security: securityTool}
+}
+
+// trustProxyCA has macOS trust the proxy's CA, for the tools that read no certificate
+// variable there. The command runs whether or not that worked.
+func trustProxyCA(caPath string, disabled bool) {
+	added, err := loginKeychain().TrustCA(caPath, proxy.CATrust{
+		OnTerminal: isatty.IsTerminal(os.Stdin.Fd()),
+		Disabled:   disabled,
+		Announce: func() {
+			utils.Log("Adding the proxy's CA to your login keychain, so that tools which read the system trust store (gh, go, terraform) accept the proxy's certificates. macOS will ask you to allow it. Use --no-ca-trust to skip this step.")
+		},
+	})
+	if err != nil {
+		utils.LogWarning(fmt.Sprintf("The proxy's CA was not added to your login keychain (%v). The command still runs, and tools that read the system trust store may report a certificate error. Use --no-ca-trust to skip this step.", err))
+	}
+	if added {
+		utils.Log("Added the proxy's CA to your login keychain. It stays trusted after this run.")
+	}
+}
+
+// forgetProxyCA takes an agent's CA out of the login keychain again. The agent is
+// deleted whether or not that worked.
+func forgetProxyCA(caPath string) {
+	_, err := loginKeychain().ForgetCA(caPath, func() {
+		utils.Log("Removing the agent's CA from your login keychain. macOS may ask you to allow it.")
+	})
+	if err != nil {
+		utils.LogWarning(fmt.Sprintf("The agent's CA may still be a trusted root in your login keychain (%v). Every agent's CA has the same name, so find this one by its SHA-256 hash: %s. Delete it there in Keychain Access.", err, proxy.CAFingerprint(caPath)))
+	}
+}
+
 // record keeps the run beside the profile so the desktop app can tell runs apart, no
 // matter which terminal launched this one. A failed write must not stop the run.
 func (r hostRun) record(run proxy.LastRun, moment string) {
@@ -133,8 +176,14 @@ address, the proxy's CA and a placeholder for each secret. A command after -- re
 the agent's own. With neither, the command is claude. Claude Code is also given the
 agent notes when it starts.
 
+On macOS, tools built with Go (gh, go, terraform) read no certificate variable and
+trust only the keychain. So on a terminal the CA of the agent's proxy is added to
+your login keychain as a trusted root for TLS the first time, after a prompt from
+macOS. It stays trusted after the run, until the agent is deleted. --no-ca-trust
+leaves the keychain alone.
+
 Without an agent name, run the command against the proxy started with a plain
-` + "`proxy start`" + `.`,
+` + "`proxy start`" + `. The CA of that proxy is never added to the keychain.`,
 	Example: `doppler-beta agent run backend-claude -- claude`,
 	Args:    cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -166,6 +215,12 @@ Without an agent name, run the command against the proxy started with a plain
 		proxyCA, err := os.ReadFile(caPath)
 		if err != nil {
 			utils.HandleError(err, "unable to read the proxy's CA")
+		}
+		// The CA of the plain proxy belongs to no agent, so no agent delete would take
+		// it out of the keychain again. It is never added.
+		if run.agentDir != "" {
+			noCATrust, _ := cmd.Flags().GetBool("no-ca-trust")
+			trustProxyCA(caPath, noCATrust)
 		}
 		caFiles := proxy.CAFiles(os.Environ(), proxyCA, run.dataDir, os.ReadFile)
 		for _, file := range caFiles {
@@ -537,6 +592,7 @@ func proxyUserinfo(rawEnv []byte) string {
 }
 
 func init() {
+	agentRunCmd.Flags().Bool("no-ca-trust", false, "do not add the proxy's CA to the macOS login keychain")
 	agentCmd.AddCommand(agentRunCmd)
 
 	agentDoctorCmd.Flags().Bool("enforced", false, "assert the full contract: an egress-containment failure is fatal")

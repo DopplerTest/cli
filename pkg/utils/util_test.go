@@ -16,11 +16,14 @@ limitations under the License.
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 var username string
@@ -134,5 +137,27 @@ func TestGetFilePath(t *testing.T) {
 	path, err = GetFilePath("/root/")
 	if err != nil || path != "/root" {
 		t.Error(fmt.Sprintf("Got %s, expected %s", path, "/root"))
+	}
+}
+
+func TestCommandOutputReturnsWhatTheCommandPrintedAndHowItEnded(t *testing.T) {
+	if IsWindows() {
+		t.Skip("the commands are run with sh")
+	}
+	output, err := CommandOutput([]string{"sh", "-c", "echo printed; echo an error >&2"}, time.Minute)
+	if err != nil || string(output) != "printed\nan error\n" {
+		t.Errorf("CommandOutput = %q, %v, want both streams and no error", output, err)
+	}
+
+	output, err = CommandOutput([]string{"sh", "-c", "echo refused; exit 3"}, time.Minute)
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 3 || string(output) != "refused\n" {
+		t.Errorf("CommandOutput = %q, %v, want what was printed and exit status 3", output, err)
+	}
+
+	started := time.Now()
+	_, err = CommandOutput([]string{"sleep", "30"}, 50*time.Millisecond)
+	if !errors.Is(err, ErrCommandTimedOut) || time.Since(started) > 10*time.Second {
+		t.Errorf("CommandOutput = %v after %s, want the command ended when its time was up", err, time.Since(started))
 	}
 }

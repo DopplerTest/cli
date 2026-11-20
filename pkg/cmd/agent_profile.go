@@ -318,7 +318,9 @@ var agentDeleteCmd = &cobra.Command{
 				utils.HandleError(herr.Unwrap(), "unable to revoke the agent's service token (pass --keep-token to delete the agent anyway)")
 			}
 		}
-		if err := os.RemoveAll(proxy.AgentDir(configuration.UserConfigDir, name)); err != nil {
+		agentDir := proxy.AgentDir(configuration.UserConfigDir, name)
+		forgetProxyCA(agentproxy.CACertPath(proxy.AgentDataDir(agentDir)))
+		if err := os.RemoveAll(agentDir); err != nil {
 			utils.HandleError(err, "unable to remove the agent directory")
 		}
 		// The home volume can hold the agent's own provider login, and its name is

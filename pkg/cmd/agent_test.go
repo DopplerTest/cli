@@ -10,7 +10,9 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +33,7 @@ import (
 
 	"github.com/DopplerHQ/cli/pkg/configuration"
 	"github.com/DopplerHQ/cli/pkg/proxy"
+	"github.com/DopplerHQ/cli/pkg/utils"
 	agentproxy "github.com/DopplerTest/agent-proxy"
 	"github.com/spf13/cobra"
 )
@@ -40,7 +43,46 @@ import (
 // else.
 const agentCommandEnv = "DOPPLER_TEST_AGENT_COMMAND"
 
+// The stand-in for the security tool of macOS is told what the keychain holds through
+// these variables, and writes the arguments of each call to the file the first names.
+const (
+	securityLogEnv   = "DOPPLER_TEST_SECURITY_LOG"
+	keychainEnv      = "DOPPLER_TEST_KEYCHAIN"       // untrusted, cancelled, locked, unanswered, or empty for a CA the system trusts
+	keychainHoldsEnv = "DOPPLER_TEST_KEYCHAIN_HOLDS" // the hash of a certificate in the login keychain
+)
+
+// standInSecurityTool answers as the security tool would, from the variables above. No
+// test of this package may run the real tool: it would put a prompt on screen and
+// change which roots this machine trusts.
+func standInSecurityTool(args ...string) ([]byte, error) {
+	if path := os.Getenv(securityLogEnv); path != "" {
+		log, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintln(log, strings.Join(args, " "))
+		log.Close()
+	}
+	keychain := os.Getenv(keychainEnv)
+	switch {
+	case args[0] == "verify-cert" && keychain != "":
+		return []byte("Cert Verify Result: CSSMERR_TP_NOT_TRUSTED\n"), errors.New("exit status 1")
+	case args[0] == "login-keychain":
+		return []byte("    \"/Users/me/Library/Keychains/login.keychain-db\"\n"), nil
+	case args[0] == "add-trusted-cert" && keychain == "cancelled":
+		return []byte("SecTrustSettingsSetTrustSettings: The authorization was canceled by the user.\n"), errors.New("exit status 1")
+	case args[0] == "find-certificate":
+		return []byte("SHA-256 hash: " + os.Getenv(keychainHoldsEnv) + "\n"), nil
+	case args[0] == "delete-certificate" && keychain == "locked":
+		return []byte("Unable to delete certificate matching \"" + os.Getenv(keychainHoldsEnv) + "\"\n"), errors.New("exit status 1")
+	case args[0] == "delete-certificate" && keychain == "unanswered":
+		return nil, utils.ErrCommandTimedOut
+	}
+	return nil, nil
+}
+
 func TestMain(m *testing.M) {
+	securityTool = standInSecurityTool
 	if os.Getenv(agentCommandEnv) == "" {
 		os.Exit(m.Run())
 	}
@@ -70,14 +112,53 @@ func runAgentCommand(t *testing.T, configDir, name string, args ...string) (stri
 	return string(output), child.ProcessState.ExitCode()
 }
 
-// seedStartedAgent saves the agent demo and the two files its proxy writes when it
-// starts, and listens on the address they name. It returns the config directory, the
-// agent's own directory and the listener that stands in for the proxy.
+// runAgentCommandOnATerminal is runAgentCommand with a terminal of its own for the
+// command, which script(1) makes. A terminal ends each line with a carriage return.
+func runAgentCommandOnATerminal(t *testing.T, configDir, name string, args ...string) (string, int) {
+	t.Helper()
+	skipWithoutATerminal(t)
+	child := exec.Command("script", slices.Concat([]string{"-q", "/dev/null", os.Args[0], name, "--config-dir", configDir}, args)...)
+	child.Env = append(os.Environ(), agentCommandEnv+"=1")
+	output := &bytes.Buffer{}
+	child.Stdout, child.Stderr = output, output
+	// script(1) ends the command when its own stdin ends, so it is kept open.
+	if _, err := child.StdinPipe(); err != nil {
+		t.Fatal(err)
+	}
+	var exit *exec.ExitError
+	if err := child.Run(); err != nil && !errors.As(err, &exit) {
+		t.Fatal(err)
+	}
+	return output.String(), child.ProcessState.ExitCode()
+}
+
+// securityCalls tells the stand-in for the security tool to keep its calls, and returns
+// a function that reads them, one line of arguments for each call.
+func securityCalls(t *testing.T) func() string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "security.log")
+	t.Setenv(securityLogEnv, path)
+	return func() string {
+		calls, _ := os.ReadFile(path)
+		return string(calls)
+	}
+}
+
+// seedStartedAgent saves the agent demo and starts the stand-in for its proxy. It
+// returns the config directory, the agent's own directory and the listener that stands
+// in for the proxy.
 func seedStartedAgent(t *testing.T) (configDir, agentDir string, proxyListener net.Listener) {
 	t.Helper()
 	configDir, _ = seedAgent(t)
 	agentDir = proxy.AgentDir(configDir, "demo")
-	dataDir := proxy.AgentDataDir(agentDir)
+	return configDir, agentDir, seedStartedProxy(t, proxy.AgentDataDir(agentDir))
+}
+
+// seedStartedProxy writes the two files a proxy writes into its data directory when it
+// starts, and listens on the address they name. It returns the listener that stands in
+// for the proxy.
+func seedStartedProxy(t *testing.T, dataDir string) net.Listener {
+	t.Helper()
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +173,7 @@ func seedStartedAgent(t *testing.T) (configDir, agentDir string, proxyListener n
 			t.Fatal(err)
 		}
 	}
-	return configDir, agentDir, proxyListener
+	return proxyListener
 }
 
 // testCertificate returns text in the form of a certificate file. The name stands for
@@ -384,6 +465,157 @@ func TestAgentRunRefusesAProxyThatHasStopped(t *testing.T) {
 	}
 	if run, _ := proxy.ReadLastRun(agentDir); run != nil {
 		t.Errorf("last run = %+v, want none for a command that never started", run)
+	}
+}
+
+// Tools built with Go read no certificate variable on macOS, so the run has the system
+// trust the proxy's CA. A prompt the user turns down costs them those tools and nothing
+// else: the command still runs.
+func TestAgentRunOnATerminalAddsTheProxysCAToTheLoginKeychain(t *testing.T) {
+	for _, tc := range []struct {
+		keychain string
+		says     []string
+	}{
+		{"untrusted", []string{"Adding the proxy's CA to your login keychain", "Added the proxy's CA to your login keychain."}},
+		{"cancelled", []string{"Adding the proxy's CA to your login keychain", "The proxy's CA was not added to your login keychain (exit status 1: SecTrustSettingsSetTrustSettings: The authorization was canceled by the user.)", "may report a certificate error", "--no-ca-trust"}},
+	} {
+		t.Run(tc.keychain, func(t *testing.T) {
+			configDir, agentDir, _ := seedStartedAgent(t)
+			calls := securityCalls(t)
+			t.Setenv(keychainEnv, tc.keychain)
+
+			output, code := runAgentCommandOnATerminal(t, configDir, "run", "demo", "--", "echo", "the command ran")
+			for _, want := range append(tc.says, "the command ran") {
+				if !strings.Contains(output, want) {
+					t.Errorf("output = %q, want it to contain %q", output, want)
+				}
+			}
+			if code != 0 {
+				t.Errorf("exit code = %d, want the command's own, 0", code)
+			}
+			caPath := agentproxy.CACertPath(proxy.AgentDataDir(agentDir))
+			want := "verify-cert -c " + caPath + " -p basic\nlogin-keychain\nadd-trusted-cert -r trustRoot -p ssl -p basic -k /Users/me/Library/Keychains/login.keychain-db " + caPath + "\n"
+			if got := calls(); got != want {
+				t.Errorf("the security tool was run with\n%s\nwant\n%s", got, want)
+			}
+		})
+	}
+}
+
+// --no-ca-trust skips the keychain and nothing else, and a run with nobody at a terminal
+// to answer a prompt asks for none. Both still get the CA files.
+func TestAgentRunLeavesTheKeychainAloneWhenToldToOrWithoutATerminal(t *testing.T) {
+	printed := []string{"sh", "-c", `echo "$SSL_CERT_FILE"`}
+	for _, tc := range []struct {
+		name string
+		run  func(t *testing.T, configDir string) (string, int)
+	}{
+		{"--no-ca-trust on a terminal", func(t *testing.T, configDir string) (string, int) {
+			return runAgentCommandOnATerminal(t, configDir, "run", append([]string{"demo", "--no-ca-trust", "--"}, printed...)...)
+		}},
+		{"not on a terminal", func(t *testing.T, configDir string) (string, int) {
+			return runAgentCommand(t, configDir, "run", append([]string{"demo", "--"}, printed...)...)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir, agentDir, _ := seedStartedAgent(t)
+			calls := securityCalls(t)
+			t.Setenv(keychainEnv, "untrusted")
+
+			output, code := tc.run(t, configDir)
+			if pattern := "^" + regexp.QuoteMeta(proxy.AgentDataDir(agentDir)) + `/ca-bundle-[0-9a-f]{12}\.crt$`; code != 0 || !regexp.MustCompile(pattern).MatchString(strings.TrimSpace(output)) {
+				t.Errorf("exit code = %d, the command printed %q, want only the bundle of this run", code, output)
+			}
+			if got := calls(); got != "" {
+				t.Errorf("the security tool was run with\n%s\nwant it left alone", got)
+			}
+		})
+	}
+}
+
+// Only agent delete takes a CA out of the keychain again, and the plain proxy belongs to
+// no agent. So a run without an agent name never adds its CA.
+func TestAgentRunWithoutAnAgentLeavesTheKeychainAlone(t *testing.T) {
+	configDir := t.TempDir()
+	seedStartedProxy(t, filepath.Join(configDir, "proxy"))
+	calls := securityCalls(t)
+	t.Setenv(keychainEnv, "untrusted")
+
+	output, code := runAgentCommandOnATerminal(t, configDir, "run", "--", "echo", "the command ran")
+	if code != 0 || strings.TrimSpace(output) != "the command ran" {
+		t.Errorf("exit code = %d, output = %q, want the command run and nothing said about the keychain", code, output)
+	}
+	if got := calls(); got != "" {
+		t.Errorf("the security tool was run with\n%s\nwant it left alone", got)
+	}
+}
+
+// seedAgentWithItsCAInTheKeychain is seedStartedAgent for an agent whose CA the login
+// keychain holds. It also returns the hash the security tool prints for that CA.
+func seedAgentWithItsCAInTheKeychain(t *testing.T) (configDir, agentDir, hash string) {
+	t.Helper()
+	configDir, agentDir, _ = seedStartedAgent(t)
+	der := []byte("the bytes of the agent's CA")
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if err := os.WriteFile(agentproxy.CACertPath(proxy.AgentDataDir(agentDir)), ca, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash = fmt.Sprintf("%X", sha256.Sum256(der))
+	t.Setenv(keychainHoldsEnv, hash)
+	return configDir, agentDir, hash
+}
+
+// The CA a run added stays a trusted root until the agent is deleted. Every agent's CA
+// has the same name, so the one to remove is named by its hash.
+func TestAgentDeleteRemovesTheAgentsCAFromTheLoginKeychain(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("only macOS has a login keychain")
+	}
+	configDir, agentDir, hash := seedAgentWithItsCAInTheKeychain(t)
+	calls := securityCalls(t)
+
+	output, code := runAgentCommand(t, configDir, "delete", "demo", "--keep-token")
+	if code != 0 || !strings.Contains(output, "Removing the agent's CA from your login keychain") || !strings.Contains(output, "Deleted agent demo") {
+		t.Errorf("exit code = %d, output = %q, want the agent deleted and the removal of its CA announced", code, output)
+	}
+	const keychain = "/Users/me/Library/Keychains/login.keychain-db"
+	want := "login-keychain\nfind-certificate -a -Z " + keychain + "\ndelete-certificate -Z " + hash + " -t " + keychain + "\n"
+	if got := calls(); got != want {
+		t.Errorf("the security tool was run with\n%s\nwant\n%s", got, want)
+	}
+	if _, err := os.Stat(agentDir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the agent directory is still there: %v", err)
+	}
+}
+
+// A user who has to take the CA out of the keychain by hand finds every agent's CA there
+// under one name. The hash is what tells this one from the others.
+func TestAgentDeleteNamesTheCAItCouldNotRemoveByItsHash(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("only macOS has a login keychain")
+	}
+	for _, tc := range []struct {
+		keychain string
+		says     string
+	}{
+		{"locked", "exit status 1: Unable to delete certificate matching"},
+		{"unanswered", "the command did not finish in time"},
+	} {
+		t.Run(tc.keychain, func(t *testing.T) {
+			configDir, agentDir, hash := seedAgentWithItsCAInTheKeychain(t)
+			t.Setenv(keychainEnv, tc.keychain)
+
+			// true stands in for docker, which agent delete runs to remove a home volume.
+			output, code := runAgentCommand(t, configDir, "delete", "demo", "--keep-token", "--docker", "true")
+			for _, want := range []string{"The agent's CA may still be a trusted root in your login keychain (" + tc.says, "SHA-256 hash: " + hash, "Deleted agent demo"} {
+				if !strings.Contains(output, want) {
+					t.Errorf("output = %q, want it to contain %q", output, want)
+				}
+			}
+			if _, err := os.Stat(agentDir); code != 0 || !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("exit code = %d, the agent directory: %v, want the agent deleted all the same", code, err)
+			}
+		})
 	}
 }
 
