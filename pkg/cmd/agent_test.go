@@ -618,6 +618,104 @@ func TestAgentDeleteNamesTheCAItCouldNotRemoveByItsHash(t *testing.T) {
 	}
 }
 
+// standInsForAgentPrograms puts a claude and a codex first on PATH. Each says that it
+// was started, and with how many arguments.
+func standInsForAgentPrograms(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	for _, program := range []string{"claude", "codex"} {
+		if err := os.WriteFile(filepath.Join(bin, program), []byte("#!/bin/sh\necho "+program+" was started with $# arguments\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// An agent.yaml written before agents lost their stored command still has one. That
+// command was written for the container, where a flag like the one here was reasonable.
+// On the user's machine it is not, so the profile loads and is shown as it is stored,
+// and agent run starts the program of the agent's kind in its place.
+func TestAgentRunDoesNotStartTheCommandAnOlderProfileStores(t *testing.T) {
+	configDir, agentDir, _ := seedStartedAgent(t)
+	profile := `name: demo
+project: proj
+config: dev
+command:
+    - claude
+    - --dangerously-skip-permissions
+agent: codex
+token_slug: slug-1
+created_at: "2026-10-01T12:00:00Z"
+`
+	if err := os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(profile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	standInsForAgentPrograms(t)
+
+	output, code := runAgentCommand(t, configDir, "run", "demo")
+	if code != 0 || output != "codex was started with 0 arguments\n" {
+		t.Errorf("exit code = %d, output = %q, want codex started for a codex agent, and the stored command left alone", code, output)
+	}
+	run, err := proxy.ReadLastRun(agentDir)
+	if want := []string{"codex"}; err != nil || run == nil || !reflect.DeepEqual(run.Command, want) {
+		t.Errorf("last run = %+v, %v, want the command %q", run, err, want)
+	}
+	shown, code := runAgentCommand(t, configDir, "show", "demo")
+	if want := `"command":["claude","--dangerously-skip-permissions"]`; code != 0 || !strings.Contains(shown, want) {
+		t.Errorf("exit code = %d, agent show printed %q, want the command as the profile stores it, %s", code, shown, want)
+	}
+}
+
+// A new agent stores no command, so agent run starts the program of its kind.
+func TestAgentRunStartsTheProgramOfTheAgentsKind(t *testing.T) {
+	configDir, _, _ := seedStartedAgent(t)
+	if err := proxy.SaveAgent(configDir, &proxy.AgentProfile{Name: "demo", Project: "proj", Config: "dev", Agent: "codex"}); err != nil {
+		t.Fatal(err)
+	}
+	standInsForAgentPrograms(t)
+
+	output, code := runAgentCommand(t, configDir, "run", "demo")
+	if code != 0 || output != "codex was started with 0 arguments\n" {
+		t.Errorf("exit code = %d, output = %q, want codex started for a codex agent", code, output)
+	}
+}
+
+// An agent has no stored command to set any more. The flag is refused before anything
+// is asked of the API.
+func TestAgentCreateTakesNoCommand(t *testing.T) {
+	configDir := t.TempDir()
+
+	output, code := runAgentCommand(t, configDir, "create", "demo", "--agent", "codex", "--command", "codex --full-auto", "--api-host", "http://127.0.0.1:1")
+	if code == 0 || !strings.Contains(output, "unknown flag: --command") {
+		t.Errorf("exit code = %d, output = %q, want the flag refused", code, output)
+	}
+	if agents, err := proxy.ListAgents(configDir); err != nil || len(agents) != 0 {
+		t.Errorf("ListAgents = %+v, %v, want no agent created", agents, err)
+	}
+}
+
+// The last column is the program agent run would start. A profile no longer stores it,
+// and the command an older profile stores is not what runs.
+func TestAgentListPrintsTheProgramAgentRunStarts(t *testing.T) {
+	configDir := t.TempDir()
+	for _, p := range []*proxy.AgentProfile{
+		{Name: "a-codex", Project: "proj", Config: "dev", Agent: "codex", WorkplaceSlug: "acme"},
+		{Name: "b-other", Project: "proj", Config: "prd", Agent: "other", WorkplaceSlug: "acme"},
+		{Name: "c-old", Project: "proj", Config: "dev", Agent: "codex", Command: []string{"claude", "--verbose"}, WorkplaceSlug: "acme"},
+	} {
+		if err := proxy.SaveAgent(configDir, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// No agent here has a token or lacks a workplace, so list has nothing to ask the
+	// API. The address is one nothing listens on all the same.
+	output, code := runAgentCommand(t, configDir, "list", "--api-host", "http://127.0.0.1:1")
+	if want := "a-codex\tproj/dev\tcodex\nb-other\tproj/prd\tclaude\nc-old\tproj/dev\tcodex\n"; code != 0 || output != want {
+		t.Errorf("exit code = %d, output = %q, want %q", code, output, want)
+	}
+}
+
 // A client that reads SSL_CERT_FILE trusts nothing outside that file, so the run gets a
 // bundle that ends with the user's own roots and the proxy CA, after the roots of the
 // system the test runs on. Node adds NODE_EXTRA_CA_CERTS to its own roots, so the user's
@@ -822,16 +920,21 @@ func TestAgentRunOnATerminalStopsWithItsCommandOnCtrlZ(t *testing.T) {
 	}
 }
 
-// The command given after -- wins over the agent's own, and claude is the command when
-// there is neither. Only a named agent has notes and a run record.
+// The command given after -- wins. Without one an agent runs the program of its kind,
+// else claude, and never the command an older profile stores. Only a named agent has
+// notes and a run record.
 func TestResolveHostRunPicksTheAgentAndTheCommand(t *testing.T) {
 	configDir := t.TempDir()
 	previous := configuration.UserConfigDir
 	configuration.UserConfigDir = configDir
 	t.Cleanup(func() { configuration.UserConfigDir = previous })
 	for _, p := range []*proxy.AgentProfile{
-		{Name: "demo", Project: "proj", Config: "dev", Command: []string{"codex", "--full-auto"}},
+		{Name: "demo", Project: "proj", Config: "dev", Agent: "claude", Command: []string{"codex", "--full-auto"}},
 		{Name: "bare", Project: "proj", Config: "dev"},
+		{Name: "codex-agent", Project: "proj", Config: "dev", Agent: "codex"},
+		{Name: "gemini-agent", Project: "proj", Config: "dev", Agent: "gemini"},
+		{Name: "aider-agent", Project: "proj", Config: "dev", Agent: "aider"},
+		{Name: "other-agent", Project: "proj", Config: "dev", Agent: "other"},
 	} {
 		if err := proxy.SaveAgent(configDir, p); err != nil {
 			t.Fatal(err)
@@ -844,9 +947,14 @@ func TestResolveHostRunPicksTheAgentAndTheCommand(t *testing.T) {
 		agent   string
 		command []string
 	}{
-		{"the agent's own command", []string{"demo"}, "demo", []string{"codex", "--full-auto"}},
-		{"a command after -- replaces it", []string{"demo", "--", "claude", "--verbose"}, "demo", []string{"claude", "--verbose"}},
-		{"an agent with no command runs claude", []string{"bare"}, "bare", []string{"claude"}},
+		{"the command an older profile stores is not run", []string{"demo"}, "demo", []string{"claude"}},
+		{"a command after -- wins for an older profile too", []string{"demo", "--", "claude", "--verbose"}, "demo", []string{"claude", "--verbose"}},
+		{"a codex agent runs codex", []string{"codex-agent"}, "codex-agent", []string{"codex"}},
+		{"a gemini agent runs gemini", []string{"gemini-agent"}, "gemini-agent", []string{"gemini"}},
+		{"an aider agent runs aider", []string{"aider-agent"}, "aider-agent", []string{"aider"}},
+		{"an agent of another kind runs claude", []string{"other-agent"}, "other-agent", []string{"claude"}},
+		{"a command after -- wins over the kind", []string{"codex-agent", "--", "sh", "-c", "true"}, "codex-agent", []string{"sh", "-c", "true"}},
+		{"an agent with no command and no kind runs claude", []string{"bare"}, "bare", []string{"claude"}},
 		{"no agent", []string{"--", "env"}, "", []string{"env"}},
 		{"an agent's name after -- is a command", []string{"--", "demo"}, "", []string{"demo"}},
 		{"a first argument that names no agent is the command", []string{"printenv", "HOME"}, "", []string{"printenv", "HOME"}},

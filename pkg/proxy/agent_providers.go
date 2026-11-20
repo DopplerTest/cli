@@ -41,6 +41,16 @@ func IsKnownAgent(s string) bool {
 	return slices.Contains(KnownAgents, s)
 }
 
+// AgentProgram returns the program an agent of this kind runs. providerHosts is keyed
+// by that program, so a kind it knows is its own program. "other" and a profile with no
+// kind run claude.
+func AgentProgram(agent string) string {
+	if _, known := providerHosts[agent]; known {
+		return agent
+	}
+	return "claude"
+}
+
 // ProviderHosts returns the passthrough hosts for the agent a command runs, by the
 // program's basename, or nil for a program the proxy does not know.
 func ProviderHosts(command []string) []string {

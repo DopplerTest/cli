@@ -52,7 +52,7 @@ type hostRun struct {
 }
 
 // resolveHostRun reads the run from the arguments. A first argument naming an existing
-// agent selects that agent, and the rest, if any, replaces the agent's own command.
+// agent selects that agent, and the rest, if any, replaces what the agent would run.
 // Otherwise every argument is the command, and the proxy is the plain `proxy start` one.
 func resolveHostRun(cmd *cobra.Command, args []string) hostRun {
 	var agent *proxy.AgentProfile
@@ -74,7 +74,7 @@ func resolveHostRun(cmd *cobra.Command, args []string) hostRun {
 	}
 	scope, _ := cfg.ResolveForConfig(agent.Config)
 	return hostRun{
-		command:   firstCommand(args[1:], agent.Command),
+		command:   firstCommand(args[1:], agent.RunCommand()),
 		notes:     proxy.RenderAgentNotes(scope),
 		config:    scope,
 		dataDir:   proxy.AgentDataDir(agentDir),
@@ -166,9 +166,11 @@ var agentRunCmd = &cobra.Command{
 	Short: "Run an agent, or any command, on this machine through the proxy",
 	Long: `Run a named agent on this machine, with its requests sent through the proxy started
 for it with ` + "`proxy start --agent <name>`" + `. The agent's environment gets the proxy
-address, the proxy's CA and a placeholder for each secret. A command after -- replaces
-the agent's own. With neither, the command is claude. Claude Code is also given the
-agent notes when it starts.
+address, the proxy's CA and a placeholder for each secret. Without a command after --
+the agent's own program is started: codex for a codex agent, gemini for a gemini
+agent, aider for an aider agent, and claude for any other. A command that an older
+version stored with the agent was written for a container and is not run. Claude
+Code is also given the agent notes when it starts.
 
 On macOS, tools built with Go (gh, go, terraform) read no certificate variable and
 trust only the keychain. So on a terminal the CA of the agent's proxy is added to

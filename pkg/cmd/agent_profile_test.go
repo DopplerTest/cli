@@ -193,4 +193,16 @@ func TestAgentViewJSONFields(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("agent view fields = %v, want %v", got, want)
 	}
+
+	// A new agent stores no command. The field stays, with null in it.
+	data, err = json.Marshal(viewOf(proxy.AgentProfile{Name: "demo", Project: "proj", Config: "dev", Agent: "codex"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if command, ok := fields["command"]; !ok || command != nil {
+		t.Errorf("command of a new agent = %v (present: %v), want the field with null", command, ok)
+	}
 }

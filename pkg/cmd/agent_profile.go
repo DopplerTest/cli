@@ -120,7 +120,7 @@ func recordAgentWorkplace(configDir string, p *proxy.AgentProfile, lookup func()
 
 var agentCreateCmd = &cobra.Command{
 	Use:   "create <name>",
-	Short: "Create a named agent: a project and config, a service token minted for it, and a command",
+	Short: "Create a named agent: a project and config, and a service token minted for it",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
@@ -145,7 +145,6 @@ var agentCreateCmd = &cobra.Command{
 			utils.HandleError(errors.New("pass --project and --config, or run this in a directory set up with `doppler-beta setup`"))
 		}
 
-		command, _ := cmd.Flags().GetString("command")
 		agentKind, _ := cmd.Flags().GetString("agent")
 		if agentKind != "" && !proxy.IsKnownAgent(agentKind) {
 			utils.HandleError(fmt.Errorf("unknown --agent %q; use one of %s", agentKind, strings.Join(proxy.KnownAgents, ", ")))
@@ -166,7 +165,6 @@ var agentCreateCmd = &cobra.Command{
 			Name:           name,
 			Project:        project,
 			Config:         config,
-			Command:        strings.Fields(command),
 			Agent:          agentKind,
 			TokenSlug:      minted.Slug,
 			TokenName:      minted.Name,
@@ -186,7 +184,7 @@ var agentCreateCmd = &cobra.Command{
 			utils.HandleError(err, "unable to store the agent's token")
 		}
 		port := proxy.NextAgentPort(configuration.UserConfigDir)
-		if _, _, err := proxy.LoadOrScaffoldWith(proxy.AgentConfigPath(dir), proxy.ProviderHostsFor(p.Agent, p.Command)); err != nil {
+		if _, _, err := proxy.LoadOrScaffoldWith(proxy.AgentConfigPath(dir), proxy.ProviderHostsFor(p.Agent, p.RunCommand())); err != nil {
 			utils.HandleError(err, "unable to scaffold the agent's proxy config")
 		}
 		if err := proxy.SetListenAddress(proxy.AgentConfigPath(dir), fmt.Sprintf("127.0.0.1:%d", port)); err != nil {
@@ -251,7 +249,7 @@ var agentListCmd = &cobra.Command{
 			return
 		}
 		for _, a := range agents {
-			utils.Print(fmt.Sprintf("%s\t%s/%s\t%s", a.Name, a.Project, a.Config, strings.Join(a.Command, " ")))
+			utils.Print(fmt.Sprintf("%s\t%s/%s\t%s", a.Name, a.Project, a.Config, strings.Join(a.RunCommand(), " ")))
 		}
 	},
 }
@@ -393,8 +391,7 @@ func httpErr(herr http.Error) error {
 func init() {
 	agentCreateCmd.Flags().StringP("project", "p", "", "Doppler project the agent reads")
 	agentCreateCmd.Flags().StringP("config", "c", "", "Doppler config the agent reads")
-	agentCreateCmd.Flags().String("command", "claude", "command that agent run starts when none is given after --")
-	agentCreateCmd.Flags().String("agent", "", "the agent family the command runs (claude, codex, gemini, aider or other); decides the provider hosts, defaults to the command's program")
+	agentCreateCmd.Flags().String("agent", "", "the agent that agent run starts (claude, codex, gemini, aider or other); also decides the provider hosts. Without it, and for other, agent run starts claude")
 	agentCreateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentRotateCmd.Flags().Duration("max-age", 0, "service token expires after this duration (e.g. '720h'); 0 means no expiry")
 	agentDeleteCmd.Flags().Bool("keep-token", false, "leave the service token in place")

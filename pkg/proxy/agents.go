@@ -28,19 +28,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// AgentProfile is a named agent: the Doppler project and config it reads, the
-// command `agent run` starts, and the service token minted for it. Its proxy config
-// (bindings, passthrough, ...) lives beside it as config.yaml, and its proxy state
-// (CA, agent env, log) under proxy/.
+// AgentProfile is a named agent: the Doppler project and config it reads, the kind
+// of agent it is, and the service token minted for it. Its proxy config (bindings,
+// passthrough, ...) lives beside it as config.yaml, and its proxy state (CA, agent
+// env, log) under proxy/.
 type AgentProfile struct {
-	Name    string   `yaml:"name" json:"name"`
-	Project string   `yaml:"project" json:"project"`
-	Config  string   `yaml:"config" json:"config"`
-	Command []string `yaml:"command" json:"command"`
-	// Agent is the program family the user picked when creating the agent (claude, codex,
-	// gemini, aider or other), kept apart from Command so a wrapper or alias in the command
-	// does not change which provider's hosts the agent's proxy config starts with. Empty on
-	// agents created before the field existed; callers fall back to the command then.
+	Name    string `yaml:"name" json:"name"`
+	Project string `yaml:"project" json:"project"`
+	Config  string `yaml:"config" json:"config"`
+	// Command is the command an older version stored for `agent run` to start. No
+	// profile gets one now. It was written for the container that version ran it in, and
+	// can hold flags that are not safe on the user's machine, so it is never run. It is
+	// still read, kept in the file and shown with the agent.
+	Command []string `yaml:"command,omitempty" json:"command"`
+	// Agent is the kind of agent the user picked when creating it (claude, codex,
+	// gemini, aider or other). It decides the program `agent run` starts and the
+	// provider hosts the agent's proxy config starts with. Empty on agents created
+	// before the field existed, which run claude.
 	Agent     string `yaml:"agent,omitempty" json:"agent"`
 	TokenSlug string `yaml:"token_slug,omitempty" json:"token_slug"`
 	TokenName string `yaml:"token_name,omitempty" json:"token_name"`
@@ -61,6 +65,12 @@ const (
 	agentTokenFile   = "token"
 	agentDataDirName = "proxy"
 )
+
+// RunCommand returns what `agent run` starts for the agent when the user names no
+// command: the program of its kind, and never the command an older profile stores.
+func (p AgentProfile) RunCommand() []string {
+	return []string{AgentProgram(p.Agent)}
+}
 
 var agentNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
