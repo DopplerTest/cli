@@ -435,6 +435,80 @@ func TestAgentRunNamesTheProxyToStartWhenItHasNotStarted(t *testing.T) {
 	}
 }
 
+// The hint names the CLI by its bare name only when that name on the PATH is this CLI.
+// Otherwise it names the path the CLI was started from, so the command runs this copy.
+func TestAgentRunNamesTheCLIInItsHintTheWayItCanBeRun(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := func(target string, elem ...string) string {
+		path := filepath.Join(append([]string{dir}, elem...)...)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	onPath := link(self, "bin", "doppler")
+	inApp := link(self, "Doppler Agent Proxy.app", "Contents", "MacOS", "doppler")
+	withQuote := link(self, "it's", "doppler")
+	// The desktop app keeps a link like this one pointed at the copy inside it.
+	appLink := link(inApp, "home", ".doppler", "bin", "doppler")
+	other := filepath.Join(dir, "other", "doppler")
+	empty := filepath.Join(dir, "empty")
+	for _, d := range []string{filepath.Dir(other), empty} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(other, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		path    string // the file that runs
+		argv0   string // the name it is started by
+		pathDir string // the one directory on the PATH
+		workDir string
+		want    string
+	}{
+		{"started by its name from the PATH", onPath, "doppler", filepath.Dir(onPath), dir, "doppler"},
+		{"started by its path while a link on the PATH leads to it", inApp, inApp, filepath.Dir(appLink), dir, "doppler"},
+		{"not on the PATH", self, self, empty, dir, self},
+		{"started by a relative path", onPath, "./doppler", empty, filepath.Dir(onPath), onPath},
+		{"a path with a space", inApp, inApp, empty, dir, "'" + inApp + "'"},
+		{"a path with a quote", withQuote, withQuote, empty, dir, "'" + dir + `/it'\''s/doppler'`},
+		{"started through a link", appLink, appLink, empty, dir, appLink},
+		{"another program of the same name on the PATH", self, self, filepath.Dir(other), dir, self},
+		{"a name that is a link to the file that runs", inApp, appLink, empty, dir, appLink},
+		{"a name that leads to no file", self, "doppler", empty, dir, self},
+		{"a name that leads to another program", self, "doppler", filepath.Dir(other), dir, self},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			child := exec.Command(tc.path, "run", "--config-dir", t.TempDir(), "--", "true")
+			child.Args[0] = tc.argv0
+			child.Dir = tc.workDir
+			child.Env = append(os.Environ(), agentCommandEnv+"=1", "PATH="+tc.pathDir, "PWD="+tc.workDir)
+			output, err := child.CombinedOutput()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+				t.Fatalf("err = %v, output = %q, want exit 1", err, output)
+			}
+			if _, hint, _ := strings.Cut(string(output), "Start the proxy first:\n  "); hint != tc.want+" proxy start\n" {
+				t.Errorf("hint = %q, want %q", hint, tc.want+" proxy start\n")
+			}
+		})
+	}
+}
+
 func TestAgentRunRefusesAnAgentEnvWithNoProxyAddress(t *testing.T) {
 	for _, agentEnv := range []string{"", "STRIPE_KEY='dp.mask.abc123'\n", "HTTPS_PROXY=''\nSTRIPE_KEY='dp.mask.abc123'\n"} {
 		configDir, agentDir, _ := seedStartedAgent(t)
@@ -928,6 +1002,16 @@ func TestResolveHostRunPicksTheAgentAndTheCommand(t *testing.T) {
 	previous := configuration.UserConfigDir
 	configuration.UserConfigDir = configDir
 	t.Cleanup(func() { configuration.UserConfigDir = previous })
+	// The CLI is on the PATH by its root command's name, so the hint names it that way.
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathDir := t.TempDir()
+	if err := os.Symlink(self, filepath.Join(pathDir, "doppler-beta")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", pathDir)
 	for _, p := range []*proxy.AgentProfile{
 		{Name: "demo", Project: "proj", Config: "dev", Agent: "claude", Command: []string{"codex", "--full-auto"}},
 		{Name: "bare", Project: "proj", Config: "dev"},

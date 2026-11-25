@@ -81,7 +81,7 @@ func agentScopedConfig(cmd *cobra.Command, p *proxy.AgentProfile) models.ScopedO
 	dir := proxy.AgentDir(configuration.UserConfigDir, p.Name)
 	token := proxy.ReadAgentToken(dir)
 	if token == "" {
-		utils.HandleError(fmt.Errorf("agent %s has no service token. Recreate it with `%s agent create`", p.Name, cmd.Root().Name()))
+		utils.HandleError(fmt.Errorf("agent %s has no service token. Recreate it with `%s agent create`", p.Name, hintProgram(cmd)))
 	}
 	lc.Token = models.ScopedOption{Value: token, Scope: "/", Source: "agent " + p.Name}
 	lc.EnclaveProject = models.ScopedOption{Value: p.Project, Scope: "/", Source: "agent " + p.Name}
@@ -197,7 +197,8 @@ var agentCreateCmd = &cobra.Command{
 		}
 		utils.Log(fmt.Sprintf("Created agent %s for %s/%s with service token %s", name, project, config, minted.Slug))
 		utils.Log(fmt.Sprintf("Proxy config: %s", proxy.AgentConfigPath(dir)))
-		utils.Log(fmt.Sprintf("Next: `%s proxy start --agent %s`, then `%s agent run %s`", cmd.Root().Name(), name, cmd.Root().Name(), name))
+		program := hintProgram(cmd)
+		utils.Log(fmt.Sprintf("Next: `%s proxy start --agent %s`, then `%s agent run %s`", program, name, program, name))
 	},
 }
 
@@ -245,7 +246,7 @@ var agentListCmd = &cobra.Command{
 			return
 		}
 		if len(agents) == 0 {
-			utils.Log("No agents yet. Create one with `" + cmd.Root().Name() + " agent create <name> -p <project> -c <config>`")
+			utils.Log("No agents yet. Create one with `" + hintProgram(cmd) + " agent create <name> -p <project> -c <config>`")
 			return
 		}
 		for _, a := range agents {
@@ -372,7 +373,7 @@ var agentRotateCmd = &cobra.Command{
 			return
 		}
 		utils.Log(fmt.Sprintf("Rotated the service token for agent %s (new token %s)", p.Name, p.TokenSlug))
-		utils.Log(fmt.Sprintf("Restart its proxy to pick up the new token: `%s proxy start --agent %s`", cmd.Root().Name(), p.Name))
+		utils.Log(fmt.Sprintf("Restart its proxy to pick up the new token: `%s proxy start --agent %s`", hintProgram(cmd), p.Name))
 	},
 }
 
