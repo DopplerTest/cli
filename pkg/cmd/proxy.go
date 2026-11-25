@@ -108,7 +108,7 @@ var proxySetupCmd = &cobra.Command{
 			utils.Log(fmt.Sprintf("Proxy config: %s", proxyConfigPath))
 		}
 		utils.Log("")
-		utils.Log("Next: set a host for each secret in that file, then `doppler-beta proxy start`")
+		utils.Log(fmt.Sprintf("Next: set a host for each secret in that file, then `%s proxy start`", hintProgram(cmd)))
 	},
 }
 
@@ -123,7 +123,7 @@ var proxyBindingsCmd = &cobra.Command{
 		localConfig := configuration.LocalConfig(cmd)
 		tokenIsConfigScoped := strings.HasPrefix(localConfig.Token.Value, "dp.st.")
 		if !tokenIsConfigScoped && (localConfig.EnclaveProject.Value == "" || localConfig.EnclaveConfig.Value == "") {
-			utils.HandleError(errors.New("no project/config selected. Run `doppler-beta proxy setup`, pass --project and --config, or use a scoped service token"))
+			utils.HandleError(fmt.Errorf("no project/config selected. Run `%s proxy setup`, pass --project and --config, or use a scoped service token", hintProgram(cmd)))
 		}
 
 		proxyConfigPath, _ := cmd.Flags().GetString("proxy-config")
@@ -131,7 +131,7 @@ var proxyBindingsCmd = &cobra.Command{
 			proxyConfigPath = proxyConfigPathFor(cmd)
 		}
 		if _, err := os.Stat(proxyConfigPath); err != nil {
-			utils.HandleError(fmt.Errorf("proxy config not found (%s). Run `doppler-beta proxy setup` first", proxyConfigPath))
+			utils.HandleError(fmt.Errorf("proxy config not found (%s). Run `%s proxy setup` first", proxyConfigPath, hintProgram(cmd)))
 		}
 
 		names, err := proxy.NewDopplerSource(localConfig).List(context.Background())

@@ -142,7 +142,7 @@ var agentCreateCmd = &cobra.Command{
 			config = localConfig.EnclaveConfig.Value
 		}
 		if project == "" || config == "" {
-			utils.HandleError(errors.New("pass --project and --config, or run this in a directory set up with `doppler-beta setup`"))
+			utils.HandleError(fmt.Errorf("pass --project and --config, or run this in a directory set up with `%s setup`", hintProgram(cmd)))
 		}
 
 		agentKind, _ := cmd.Flags().GetString("agent")
