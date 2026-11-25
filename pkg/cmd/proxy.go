@@ -199,10 +199,10 @@ var proxyStartCmd = &cobra.Command{
 
 		// A config-scoped service token (dp.st.) carries its own project/config.
 		// Otherwise we need a selected project + config — guide the user to
-		// `doppler setup` instead of failing later with a raw API error.
+		// this CLI's `setup` instead of failing later with a raw API error.
 		tokenIsConfigScoped := strings.HasPrefix(localConfig.Token.Value, "dp.st.")
 		if !tokenIsConfigScoped && (localConfig.EnclaveProject.Value == "" || localConfig.EnclaveConfig.Value == "") {
-			utils.HandleError(errors.New("no project/config selected. Run `doppler setup`, pass --project and --config, or use a scoped service token"))
+			utils.HandleError(fmt.Errorf("no project/config selected. Run `%s setup`, pass --project and --config, or use a scoped service token", hintProgram(cmd)))
 		}
 
 		// Look up the requested engine in the registry. This indirection is the
