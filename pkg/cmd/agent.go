@@ -23,6 +23,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -64,7 +66,7 @@ func resolveHostRun(cmd *cobra.Command, args []string) hostRun {
 			command:   firstCommand(args),
 			config:    &proxy.ProxyConfig{},
 			dataDir:   proxyDataDir(),
-			startHint: fmt.Sprintf("%s proxy start", cmd.Root().Name()),
+			startHint: fmt.Sprintf("%s proxy start", hintProgram(cmd)),
 		}
 	}
 	agentDir := proxy.AgentDir(configuration.UserConfigDir, agent.Name)
@@ -78,7 +80,7 @@ func resolveHostRun(cmd *cobra.Command, args []string) hostRun {
 		notes:     proxy.RenderAgentNotes(scope),
 		config:    scope,
 		dataDir:   proxy.AgentDataDir(agentDir),
-		startHint: fmt.Sprintf("%s proxy start --agent %s", cmd.Root().Name(), agent.Name),
+		startHint: fmt.Sprintf("%s proxy start --agent %s", hintProgram(cmd), agent.Name),
 		agentDir:  agentDir,
 	}
 }
@@ -91,6 +93,53 @@ func firstCommand(commands ...[]string) []string {
 		}
 	}
 	return []string{"claude"}
+}
+
+// hintProgram is how a hint names this CLI in a command for the user to run. It is the
+// bare program name when that name on the PATH is this executable. Otherwise it is the
+// path the CLI was started with, made absolute and quoted for a shell, since the bare
+// name would run another copy or nothing at all. A symlink in that path is kept, so a
+// copy started through a stable link is named by the link. When argv[0] does not lead
+// to this executable, the hint falls back to the path os.Executable reports, which has
+// its symlinks resolved on Linux.
+func hintProgram(cmd *cobra.Command) string {
+	name := cmd.Root().Name()
+	self, err := os.Executable()
+	if err != nil {
+		return name
+	}
+	if onPath, err := exec.LookPath(name); err == nil && sameFile(onPath, self) {
+		return name
+	}
+	// LookPath checks a path as it is and looks a bare name up on the PATH. The process
+	// that started the CLI chose argv[0], so it may not name this executable.
+	started, err := exec.LookPath(os.Args[0])
+	if err == nil {
+		started, err = filepath.Abs(started)
+	}
+	if err != nil || !sameFile(started, self) {
+		started = self
+	}
+	return shellWord(started)
+}
+
+// sameFile reports whether the two paths lead to one file, with symlinks followed.
+func sameFile(a, b string) bool {
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
+}
+
+// shellLiteral matches a word that a POSIX shell reads as it is.
+var shellLiteral = regexp.MustCompile(`^[A-Za-z0-9@%+=:,./_-]+$`)
+
+// shellWord returns s as one word for a POSIX shell: as it is when the shell reads it
+// that way, and in single quotes otherwise.
+func shellWord(s string) string {
+	if shellLiteral.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // proxyAddress returns the host and port of the proxy that agent.env names in
